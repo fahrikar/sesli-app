@@ -145,6 +145,7 @@
         </div>
         <h3>Sesli Komut</h3>
         <p id="micHint">Konuş, otomatik yazıya dökülsün</p>
+        <div id="liveBox" style="display:none;width:100%;padding:0 18px"></div>
       </div>
       <div class="hero cam" onclick="go('camera')">
         <div class="disc cam">
@@ -328,7 +329,11 @@ async function startVoice(){
       if(e.results[i].isFinal)fin+=t+' '; else interim+=t;
     }
     if(fin)base+=fin;
-    document.getElementById('voiceText').value=(base+interim).trim();
+    const full=(base+interim).trim();
+    document.getElementById('voiceText').value=full;
+    const lb=document.getElementById('liveBox');
+    if(lb){lb.style.display='block';
+      lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:10px 12px;font-size:14px;text-align:left;max-height:120px;overflow:auto">'+escapeHtml(full||'…')+'</div>';}
   };
   recog.onerror=ev=>{ st.textContent='Hata: '+ev.error; };
   recog.onend=()=>{ if(listening){try{recog.start();}catch(e){}} };
@@ -354,18 +359,41 @@ function bindHold(el,opts={}){
   if(!el)return;
   const down=e=>{
     e.preventDefault(); held=false;
-    holdTimer=setTimeout(()=>{ held=true; startVoice(); if(opts.goVoice)go('voice'); },180);
+    holdTimer=setTimeout(()=>{ held=true; startVoice(); },140);
   };
   const up=e=>{
     e.preventDefault(); clearTimeout(holdTimer);
-    if(held){ stopVoice(); if(opts.goVoice)go('voice'); }
-    else if(opts.goVoice){ go('voice'); }
+    if(held){ stopVoice(); autoSaveVoice(); }
   };
   el.addEventListener('pointerdown',down);
   el.addEventListener('pointerup',up);
   el.addEventListener('pointercancel',up);
   el.addEventListener('pointerleave',e=>{ if(held){clearTimeout(holdTimer); stopVoice();} });
   el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+
+
+/* ---------- KAYIT BIRAKILINCA OTOMATİK KAYDET ---------- */
+async function autoSaveVoice(){
+  setTimeout(async ()=>{
+    const txt=document.getElementById('voiceText').value.trim();
+    const lb=document.getElementById('liveBox');
+    if(!txt){ if(lb)lb.style.display='none'; return; }
+    const items=parseItems(txt);
+    const bilinen=items.filter(i=>i.known), bilinmeyen=items.filter(i=>!i.known);
+    NOTES.unshift({id:Date.now(),type:'voice',text:txt,items,createdAt:new Date().toISOString()});
+    await Store.set('notes',NOTES);
+    document.getElementById('voiceText').value='';
+    if(lb){
+      lb.style.display='block';
+      lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">'
+        +'<div style="font-weight:600;margin-bottom:6px">Kaydedildi</div>'
+        +(bilinen.length?bilinen.map(i=>'<div style="display:flex;justify-content:space-between;padding:3px 0"><span>'+escapeHtml(i.known)+'</span><b>'+money(i.amount)+'</b></div>').join(''):'<div class="muted">Tanınan kalem yok.</div>')
+        +(bilinmeyen.length?'<div class="muted" style="margin-top:8px">'+bilinmeyen.length+' kalem tanımlanamadı, Excel\'e eklenmedi. Kayıtlar bölümünden düzeltebilirsin.</div>':'')
+        +'</div>';
+      setTimeout(()=>{lb.style.display='none';lb.innerHTML='';},6000);
+    }
+  },700);
 }
 
 /* ---------- KAMERA + OCR ---------- */
@@ -402,6 +430,35 @@ async function runOCR(dataURL){
 
 
 /* ---------- KONUŞMADAN KALEM ÇIKARMA (kategori + tutar) ---------- */
+/* ---------- TANIMLI KATEGORİLER (sadece bunlar Excel'e gider) ---------- */
+const CATEGORY_MAP=[
+  {ad:'Emanet',            grup:'Kasa',                       kelimeler:['emanet']},
+  {ad:'Çek',               grup:'Ödeme',                      kelimeler:['çek','cek']},
+  {ad:'Tahsilat',          grup:'Gelir',                      kelimeler:['tahsilat','tahsil','gelir','ödeme aldım']},
+  {ad:'Ev Gideri',         grup:'Gider',                      kelimeler:['ev gider','ev gideri','ev harcama','ev masraf']},
+  {ad:'Fabrika Gideri',    grup:'Fabrika Giderleri',          kelimeler:['fabrika gider','fabrika gideri','fabrika masraf']},
+  {ad:'İşçi Ödemesi',      grup:'Fabrika Giderleri',          kelimeler:['işçi','isci','personel','yevmiye','maaş','maas','işçi ödeme']},
+  {ad:'Diğer Gider',       grup:'Fabrika Giderleri',          kelimeler:['diğer gider','diger gider','genel gider']},
+  {ad:'Söve Hammaddesi',   grup:'Söve ve Boya Hammaddeleri',  kelimeler:['söve','sove','strafor','ströfor']},
+  {ad:'Boya Hammaddesi',   grup:'Söve ve Boya Hammaddeleri',  kelimeler:['boya','astar','vernik','tiner']},
+  {ad:'İnşaat Malzemesi',  grup:'İnşaat Malzemeleri',         kelimeler:['inşaat','insaat','çimento','cimento','demir','kum','tuğla','tugla','kereste','beton','alçı','alci']},
+  {ad:'Yakıt',             grup:'Gider',                      kelimeler:['yakıt','yakit','mazot','benzin','motorin']},
+  {ad:'Nakliye',           grup:'Gider',                      kelimeler:['nakliye','kargo','sevkiyat','taşıma']},
+  {ad:'Kira',              grup:'Gider',                      kelimeler:['kira']},
+  {ad:'Vergi',             grup:'Gider',                      kelimeler:['vergi','sgk','stopaj']},
+  {ad:'Elektrik',          grup:'Gider',                      kelimeler:['elektrik']},
+  {ad:'Su',                grup:'Gider',                      kelimeler:['su faturası','su fatura']},
+  {ad:'Doğalgaz',          grup:'Gider',                      kelimeler:['doğalgaz','dogalgaz','gaz faturası']}
+];
+function matchCategory(text){
+  const t=trLower(text);
+  let best=null,bestLen=0;
+  CATEGORY_MAP.forEach(c=>c.kelimeler.forEach(k=>{
+    if(t.includes(trLower(k))&&k.length>bestLen){best=c;bestLen=k.length;}
+  }));
+  return best;
+}
+
 function trLower(t){return t.replace(/İ/g,'i').replace(/I/g,'ı').toLocaleLowerCase('tr-TR')}
 function parseAmount(str){
   // "5.000", "5000", "5 bin", "100 bin", "1,5 milyon"
@@ -436,7 +493,9 @@ function parseItems(text){
     cat=cat.replace(/\s+/g,' ').trim();
     if(!cat)cat='Diğer';
     cat=cat.charAt(0).toLocaleUpperCase('tr-TR')+cat.slice(1);
-    out.push({category:cat,amount:num,raw:(m[0]||'').trim()});
+    const mc=matchCategory(cat);
+    out.push({category:cat,amount:num,raw:(m[0]||'').trim(),
+              known:mc?mc.ad:null, grup:mc?mc.grup:null});
   }
   return out;
 }
@@ -444,15 +503,24 @@ function money(n){return n.toLocaleString('tr-TR',{minimumFractionDigits:0,maxim
 function groupItems(list){
   const g={};
   list.forEach(it=>{
-    const key=trLower(it.category);
-    if(!g[key])g[key]={category:it.category,count:0,total:0,items:[]};
+    const name=it.known||it.category;
+    const key=trLower(name);
+    if(!g[key])g[key]={category:name,grup:it.grup||'Tanımsız',count:0,total:0,items:[]};
     g[key].count++; g[key].total+=it.amount; g[key].items.push(it);
   });
   return Object.values(g).sort((a,b)=>b.total-a.total);
 }
-function allItems(notes){
+function allItems(notes,includeUnknown){
   const out=[];
-  notes.forEach(n=>(n.items||[]).forEach(it=>out.push(Object.assign({},it,{createdAt:n.createdAt}))));
+  notes.forEach(n=>(n.items||[]).forEach(it=>{
+    if(!includeUnknown&&!it.known)return;
+    out.push(Object.assign({},it,{createdAt:n.createdAt}));
+  }));
+  return out;
+}
+function unknownItems(notes){
+  const out=[];
+  notes.forEach(n=>(n.items||[]).forEach(it=>{ if(!it.known)out.push(Object.assign({},it,{createdAt:n.createdAt})); }));
   return out;
 }
 
@@ -469,7 +537,9 @@ async function saveNote(type){
   NOTES.unshift({id:Date.now(),type,text:txt,items,createdAt:new Date().toISOString()});
   await Store.set('notes',NOTES);
   document.getElementById(el).value='';
-  alert(items.length?('✅ Kaydedildi. '+items.length+' kalem algılandı:\n'+items.map(i=>'• '+i.category+': '+money(i.amount)).join('\n')):'✅ Kaydedildi (tutar algılanmadı, metin olarak saklandı).');
+  const bil=items.filter(i=>i.known), bilm=items.filter(i=>!i.known);
+  alert((bil.length?'✅ '+bil.length+' kalem tanındı:\n'+bil.map(i=>'• '+i.known+': '+money(i.amount)).join('\n'):'✅ Kaydedildi.')
+    +(bilm.length?'\n\n⚠️ '+bilm.length+' kalem tanımlanamadı, Excel\'e eklenmeyecek:\n'+bilm.map(i=>'• '+i.category).join('\n'):''));
 }
 function renderNotes(){
   const box=document.getElementById('notesList');
@@ -503,9 +573,15 @@ function exportSelected(fmtType){
   if(!list.length){alert('Kayıt yok.');return;}
   const title='Kayitlar_'+todayStr();
   if(fmtType==='excel'){
-    const rows=list.map(n=>({Tarih:fmt(n.createdAt),Tur:n.type==='voice'?'Ses':'Görsel',Metin:n.text}));
-    const ws=XLSX.utils.json_to_sheet(rows); const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,'Kayıtlar'); XLSX.writeFile(wb,title+'.xlsx'); return;
+    const its=allItems(list), groups=groupItems(its);
+    if(!its.length){alert('Tanımlı kalem bulunamadı. Excel oluşturulmadı.');return;}
+    const wb=XLSX.utils.book_new();
+    const sum=groups.map(g=>({Kategori:g.category,Grup:g.grup,'Adet':g.count,'Toplam Tutar':g.total}));
+    sum.push({Kategori:'GENEL TOPLAM',Grup:'','Adet':its.length,'Toplam Tutar':its.reduce((a,b)=>a+b.amount,0)});
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sum),'Özet');
+    const det=its.map(i=>({Tarih:fmt(i.createdAt),Kategori:i.known,Grup:i.grup,Tutar:i.amount}));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(det),'Detay');
+    XLSX.writeFile(wb,title+'.xlsx'); return;
   }
   const body=`<h2 style="font-family:sans-serif">Kayıtlar</h2>`+list.map(n=>
     `<div style="font-family:sans-serif;margin-bottom:14px">
@@ -541,7 +617,8 @@ function report(kind){
         <button class="btn sm" onclick="exportReport('excel')">Excel</button>
         <button class="btn sm ghost" onclick="exportReport('word')">Word</button>
         <button class="btn sm ghost" onclick="exportReport('pdf')">PDF</button>
-      </div></div>`;
+      </div>
+      <button class="btn" style="margin-top:10px" onclick="exportFullTemplate()">Tam Excel Şablonu (10 sayfa)</button></div>`;
   const groupHtml=groups.length?('<div class="card"><b>Gruplu Döküm</b>'+groups.map(g=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)">
         <div><div style="font-weight:500">${escapeHtml(g.category)}</div>
@@ -549,8 +626,10 @@ function report(kind){
         <div style="font-weight:600">${money(g.total)}</div>
       </div>`).join('')+`<div style="display:flex;justify-content:space-between;padding:13px 0 2px;font-weight:600">
         <span>Genel Toplam</span><span>${money(grandTotal)}</span></div></div>`):'';
+  const unk=unknownItems(list);
+  const unkHtml=unk.length?`<div class="banner">${unk.length} kalem tanımlanamadı ve rapora/Excel'e alınmadı: ${unk.slice(0,6).map(u=>escapeHtml(u.category)).join(', ')}${unk.length>6?'…':''}</div>`:'';
   const items=list.length?list.map(n=>`<div class="card"><span class="pill ${n.type}">${n.type==='voice'?'Ses':'Görsel'}</span><span class="pill">${fmt(n.createdAt)}</span><p class="note-txt">${escapeHtml(n.text)}</p></div>`).join(''):'<div class="empty">Bu dönemde kayıt yok.</div>';
-  box.innerHTML=head+groupHtml+items;
+  box.innerHTML=head+unkHtml+groupHtml+items;
   window._reportList=list;
 }
 function exportReport(t){
@@ -566,8 +645,6 @@ function exportReport(t){
     const det=[];
     groups.forEach(g=>g.items.forEach(i=>det.push({Kategori:g.category,Tutar:i.amount,Tarih:fmt(i.createdAt),Metin:i.raw})));
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(det.length?det:[{Kategori:'',Tutar:'',Tarih:'',Metin:''}]),'Detay');
-    const ham=list.map(n=>({Tarih:fmt(n.createdAt),Tur:n.type==='voice'?'Ses':'Görsel',Metin:n.text}));
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ham.length?ham:[{Tarih:'',Tur:'',Metin:''}]),'Ham Kayıt');
     XLSX.writeFile(wb,title+'.xlsx');return;
   }
   const _its=allItems(list), _g=groupItems(_its);
@@ -701,6 +778,80 @@ function exportStock(){
   XLSX.writeFile(wb,'Stok_'+todayStr()+'.xlsx');
 }
 
+
+/* ---------- TAM EXCEL ŞABLONU ---------- */
+function W(ws,widths){ws['!cols']=widths.map(w=>({wch:w}));return ws;}
+function exportFullTemplate(){
+  const wb=XLSX.utils.book_new();
+  const now=new Date();
+  const its=allItems(NOTES), groups=groupItems(its);
+  const week=NOTES.filter(n=>new Date(n.createdAt)>=new Date(Date.now()-7*864e5));
+  const month=NOTES.filter(n=>new Date(n.createdAt)>=new Date(now.getFullYear(),now.getMonth(),1));
+  const wIts=allItems(week), mIts=allItems(month);
+  const toplam=a=>a.reduce((x,y)=>x+y.amount,0);
+
+  /* 1) KAPAK / ÖZET */
+  const kapak=[
+    {Alan:'Rapor Adı',Değer:'İşletme Takip Şablonu'},
+    {Alan:'Oluşturma Tarihi',Değer:fmt(now.toISOString())},
+    {Alan:'Toplam Kayıt',Değer:NOTES.length},
+    {Alan:'Tanımlı Kalem',Değer:its.length},
+    {Alan:'Haftalık Toplam (₺)',Değer:toplam(wIts)},
+    {Alan:'Aylık Toplam (₺)',Değer:toplam(mIts)},
+    {Alan:'Genel Toplam (₺)',Değer:toplam(its)},
+    {Alan:'Stok Kalem Sayısı',Değer:STOCK.length},
+    {Alan:'Stok Değeri (₺)',Değer:STOCK.reduce((a,b)=>a+b.qty*b.price,0)},
+    {Alan:'Bekleyen Çek Adedi',Değer:PAYMENTS.filter(p=>daysUntil(p.dueDate)>=0).length},
+    {Alan:'Kritik Stok Adedi',Değer:STOCK.filter(i=>i.min>0&&i.qty<=i.min).length}
+  ];
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(kapak),[26,22]),'Kapak');
+
+  /* 2) KATEGORİ ÖZETİ */
+  const ozet=groups.map(g=>({Kategori:g.category,Grup:g.grup,'Kayıt Adedi':g.count,'Toplam Tutar':g.total}));
+  ozet.push({Kategori:'GENEL TOPLAM',Grup:'','Kayıt Adedi':its.length,'Toplam Tutar':toplam(its)});
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(ozet.length?ozet:[{Kategori:'',Grup:'','Kayıt Adedi':'','Toplam Tutar':''}]),[24,26,12,16]),'Kategori Özeti');
+
+  /* 3) HAFTALIK */
+  const hg=groupItems(wIts).map(g=>({Kategori:g.category,Grup:g.grup,Adet:g.count,'Toplam Tutar':g.total}));
+  hg.push({Kategori:'HAFTA TOPLAMI',Grup:'',Adet:wIts.length,'Toplam Tutar':toplam(wIts)});
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(hg),[24,26,10,16]),'Haftalık Rapor');
+
+  /* 4) AYLIK */
+  const mg=groupItems(mIts).map(g=>({Kategori:g.category,Grup:g.grup,Adet:g.count,'Toplam Tutar':g.total}));
+  mg.push({Kategori:'AY TOPLAMI',Grup:'',Adet:mIts.length,'Toplam Tutar':toplam(mIts)});
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(mg),[24,26,10,16]),'Aylık Rapor');
+
+  /* 5) HAREKET DETAYI */
+  const det=its.map(i=>({Tarih:fmt(i.createdAt),Kategori:i.known,Grup:i.grup,'Tutar (₺)':i.amount,Kaynak:i.raw}));
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(det.length?det:[{Tarih:'',Kategori:'',Grup:'','Tutar (₺)':'',Kaynak:''}]),[18,22,26,14,34]),'Hareket Detayı');
+
+  /* 6) ÇEK ÖDEMELERİ */
+  const cek=PAYMENTS.map(p=>({Açıklama:p.title,Tutar:p.amount||'','Vade Tarihi':fmtDate(p.dueDate),
+    'Kalan Gün':daysUntil(p.dueDate),Durum:daysUntil(p.dueDate)<0?'Ödendi/Geçti':daysUntil(p.dueDate)===0?'Bugün':'Bekliyor'}));
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(cek.length?cek:[{Açıklama:'',Tutar:'','Vade Tarihi':'','Kalan Gün':'',Durum:''}]),[28,14,14,12,14]),'Çek Ödemeleri');
+
+  /* 7) STOK LİSTESİ */
+  const stok=STOCK.map(i=>({Kategori:i.cat,'Alt Grup':i.sub,Ürün:i.name,Miktar:i.qty,Birim:i.unit,
+    'Kritik Seviye':i.min,'Birim Fiyat':i.price,'Toplam Değer':i.qty*i.price,
+    Durum:(i.min>0&&i.qty<=i.min)?'KRİTİK':'Normal'}));
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(stok.length?stok:[{Kategori:'','Alt Grup':'',Ürün:'',Miktar:'',Birim:'','Kritik Seviye':'','Birim Fiyat':'','Toplam Değer':'',Durum:''}]),[26,20,26,10,10,13,12,14,10]),'Stok Listesi');
+
+  /* 8) STOK HAREKETLERİ */
+  const mv=MOVES.map(m=>{const it=STOCK.find(x=>x.id===m.itemId)||{};
+    return {Tarih:fmt(m.at),Ürün:it.name||'-',Kategori:it.cat||'-',Hareket:m.type==='giris'?'Giriş':'Çıkış',Miktar:m.qty,Birim:it.unit||'',Not:m.note};});
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(mv.length?mv:[{Tarih:'',Ürün:'',Kategori:'',Hareket:'',Miktar:'',Birim:'',Not:''}]),[18,26,26,10,10,10,24]),'Stok Hareketleri');
+
+  /* 9) TANIMLI KATEGORİLER (sözlük) */
+  const sozluk=CATEGORY_MAP.map(c=>({Kategori:c.ad,Grup:c.grup,'Tanınan Kelimeler':c.kelimeler.join(', ')}));
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(sozluk),[24,28,50]),'Tanımlı Kategoriler');
+
+  /* 10) TANIMLANAMAYAN (bilgi amaçlı, toplamlara dahil değil) */
+  const unk=unknownItems(NOTES).map(u=>({Tarih:fmt(u.createdAt),'Algılanan Metin':u.category,'Tutar':u.amount,Not:'Kategori tanımlı değil - toplamlara dahil edilmedi'}));
+  XLSX.utils.book_append_sheet(wb,W(XLSX.utils.json_to_sheet(unk.length?unk:[{Tarih:'','Algılanan Metin':'','Tutar':'',Not:''}]),[18,30,14,46]),'Tanımlanamayan');
+
+  XLSX.writeFile(wb,'Isletme_Sablonu_'+todayStr()+'.xlsx');
+}
+
 /* ---------- ÇEK ÖDEMELERİ ---------- */
 async function addPayment(){
   const t=document.getElementById('payTitle').value.trim();
@@ -749,7 +900,7 @@ function checkReminders(){
   MOVES=await Store.get('moves',[]);
   if('Notification'in window&&Notification.permission==='default'){try{Notification.requestPermission();}catch(e){}}
   checkReminders();
-  bindHold(document.getElementById('micHero'),{goVoice:true});
+  bindHold(document.getElementById('micHero'),{});
 })();
 </script>
 </body>
