@@ -199,19 +199,17 @@
     </div>
   </section>
 
-  <!-- NOTES -->
+  <!-- NOTES / TABLO -->
   <section class="screen" id="notes">
-    <h2>Kayıtlar</h2>
+    <h2>Tablo</h2>
     <div class="card">
-      <div class="muted" style="margin-bottom:12px">Dışa aktarmak için seç, sonra formata bas.</div>
       <div class="row">
-        <button class="btn sm" onclick="exportSelected('word')">Word</button>
-        <button class="btn sm" onclick="exportSelected('excel')">Excel</button>
-        <button class="btn sm" onclick="exportSelected('pdf')">PDF</button>
-        <button class="btn sm ghost" onclick="toggleAll()">Tümünü seç</button>
+        <button class="btn sm" onclick="exportTable()">Excel'e Aktar</button>
+        <button class="btn sm ghost" onclick="exportFullTemplate()">Tam Şablon</button>
+        <button class="btn sm ghost" onclick="go('home')">Yeni Kayıt</button>
       </div>
     </div>
-    <div id="notesList"></div>
+    <div id="tableBox"></div>
   </section>
 
   <!-- REPORTS -->
@@ -276,7 +274,7 @@
   <button class="on" id="nHome" onclick="go('home')">
     <svg viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9h12v-9"/></svg>Ana</button>
   <button id="nNotes" onclick="go('notes')">
-    <svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2.5"/><line x1="8.5" y1="8.5" x2="15.5" y2="8.5"/><line x1="8.5" y1="12" x2="15.5" y2="12"/><line x1="8.5" y1="15.5" x2="13" y2="15.5"/></svg>Kayıtlar</button>
+    <svg viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2.5"/><line x1="8.5" y1="8.5" x2="15.5" y2="8.5"/><line x1="8.5" y1="12" x2="15.5" y2="12"/><line x1="8.5" y1="15.5" x2="13" y2="15.5"/></svg>Tablo</button>
   <button id="nReports" onclick="go('reports')">
     <svg viewBox="0 0 24 24"><line x1="4.5" y1="20" x2="19.5" y2="20"/><line x1="7.5" y1="20" x2="7.5" y2="12"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="16.5" y1="20" x2="16.5" y2="14"/></svg>Rapor</button>
   <button id="nStock" onclick="go('stock')">
@@ -295,7 +293,7 @@ const Store={
 let NOTES=[], PAYMENTS=[];
 
 /* ---------- navigation ---------- */
-const titles={home:'Sesli & Görsel Kayıt',voice:'Sesli Komut',camera:'Kamera',notes:'Kayıtlar',reports:'Rapor',stock:'Stok Takibi',payments:'Çek Ödemeleri'};
+const titles={home:'Sesli & Görsel Kayıt',voice:'Sesli Komut',camera:'Kamera',notes:'Tablo',reports:'Rapor',stock:'Stok Takibi',payments:'Çek Ödemeleri'};
 function go(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -384,6 +382,7 @@ async function autoSaveVoice(){
     NOTES.unshift({id:Date.now(),type:'voice',text:txt,items,createdAt:new Date().toISOString()});
     await Store.set('notes',NOTES);
     document.getElementById('voiceText').value='';
+    renderTable();
     if(lb){
       lb.style.display='block';
       lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">'
@@ -541,25 +540,62 @@ async function saveNote(type){
   alert((bil.length?'✅ '+bil.length+' kalem tanındı:\n'+bil.map(i=>'• '+i.known+': '+money(i.amount)).join('\n'):'✅ Kaydedildi.')
     +(bilm.length?'\n\n⚠️ '+bilm.length+' kalem tanımlanamadı, Excel\'e eklenmeyecek:\n'+bilm.map(i=>'• '+i.category).join('\n'):''));
 }
-function renderNotes(){
-  const box=document.getElementById('notesList');
-  if(!NOTES.length){box.innerHTML='<div class="empty">Henüz kayıt yok.<br>Sesli komut ya da kamera ile başla.</div>';return;}
-  box.innerHTML=NOTES.map(n=>`
-    <div class="card">
-      <div style="display:flex;gap:10px;align-items:flex-start">
-        <input type="checkbox" class="check" data-id="${n.id}">
-        <div style="flex:1">
-          <span class="pill ${n.type}">${n.type==='voice'?'Ses':'Görsel'}</span>
-          <span class="pill">${fmt(n.createdAt)}</span>
-          <p class="note-txt">${escapeHtml(n.text)}</p>
-          <button class="btn sm ghost" style="margin-top:10px" onclick="delNote(${n.id})">Sil</button>
-        </div>
-      </div>
-    </div>`).join('');
+function renderNotes(){ renderTable(); }
+function renderTable(){
+  const box=document.getElementById('tableBox');
+  if(!box)return;
+  const rows=[];
+  NOTES.forEach(n=>(n.items||[]).forEach((it,idx)=>rows.push({noteId:n.id,idx,
+    tarih:fmt(n.createdAt),kategori:it.known||it.category,grup:it.grup||'—',
+    tutar:it.amount,taninan:!!it.known})));
+  if(!rows.length){box.innerHTML='<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>';return;}
+  const toplam=rows.filter(r=>r.taninan).reduce((a,b)=>a+b.tutar,0);
+  const unk=rows.filter(r=>!r.taninan).length;
+  let html='<div class="card" style="padding:0;overflow:hidden">'
+   +'<table style="width:100%;border-collapse:collapse;font-size:13px">'
+   +'<thead><tr style="background:#f2ebdd">'
+   +'<th style="text-align:left;padding:10px 8px;font-weight:600">Tarih</th>'
+   +'<th style="text-align:left;padding:10px 8px;font-weight:600">Kategori</th>'
+   +'<th style="text-align:right;padding:10px 8px;font-weight:600">Tutar</th>'
+   +'<th style="width:34px"></th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    html+='<tr style="border-top:1px solid var(--line)'+(r.taninan?'':';background:#fdf6e6')+'">'
+      +'<td style="padding:9px 8px;color:var(--sub);white-space:nowrap">'+r.tarih.split(' ')[0]+'</td>'
+      +'<td style="padding:9px 8px">'+escapeHtml(r.kategori)
+        +(r.taninan?'<div class="muted" style="font-size:11px">'+escapeHtml(r.grup)+'</div>'
+                   :'<div class="muted" style="font-size:11px">tanımsız · Excel\'e girmez</div>')+'</td>'
+      +'<td style="padding:9px 8px;text-align:right;font-weight:600;white-space:nowrap">'+money(r.tutar)+'</td>'
+      +'<td style="padding:9px 4px;text-align:center"><span onclick="delRow('+r.noteId+','+r.idx+')" style="cursor:pointer;color:#b23b34;font-size:16px">×</span></td></tr>';
+  });
+  html+='<tr style="border-top:2px solid var(--line);background:#faf6ee">'
+    +'<td colspan="2" style="padding:11px 8px;font-weight:700">TOPLAM</td>'
+    +'<td style="padding:11px 8px;text-align:right;font-weight:700">'+money(toplam)+'</td><td></td></tr>';
+  html+='</tbody></table></div>';
+  if(unk)html+='<div class="banner">'+unk+' satır tanımlanamadı (sarı). Bunlar toplama ve Excel\'e dahil edilmez.</div>';
+  box.innerHTML=html;
+}
+async function delRow(noteId,idx){
+  const n=NOTES.find(x=>x.id===noteId); if(!n)return;
+  n.items.splice(idx,1);
+  if(!n.items.length&&!n.text)NOTES=NOTES.filter(x=>x.id!==noteId);
+  await Store.set('notes',NOTES); renderTable();
+}
+function exportTable(){
+  const its=allItems(NOTES);
+  if(!its.length){alert('Tanımlı kalem yok.');return;}
+  const wb=XLSX.utils.book_new();
+  const det=its.map(i=>({Tarih:fmt(i.createdAt),Kategori:i.known,Grup:i.grup,'Tutar (₺)':i.amount}));
+  det.push({Tarih:'',Kategori:'TOPLAM',Grup:'','Tutar (₺)':its.reduce((a,b)=>a+b.amount,0)});
+  const ws=XLSX.utils.json_to_sheet(det); ws['!cols']=[{wch:18},{wch:24},{wch:26},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,ws,'Tablo');
+  const g=groupItems(its).map(x=>({Kategori:x.category,Grup:x.grup,Adet:x.count,Toplam:x.total}));
+  const ws2=XLSX.utils.json_to_sheet(g); ws2['!cols']=[{wch:24},{wch:26},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Özet');
+  XLSX.writeFile(wb,'Tablo_'+todayStr()+'.xlsx');
 }
 async function delNote(id){ NOTES=NOTES.filter(n=>n.id!==id); await Store.set('notes',NOTES); renderNotes(); }
 let allSel=false;
-function toggleAll(){ allSel=!allSel; document.querySelectorAll('#notesList .check').forEach(c=>c.checked=allSel); }
+function toggleAll(){ allSel=!allSel; document.querySelectorAll('#tableBox .check').forEach(c=>c.checked=allSel); }
 function selectedNotes(){
   const ids=[...document.querySelectorAll('#notesList .check:checked')].map(c=>+c.dataset.id);
   const sel=NOTES.filter(n=>ids.includes(n.id));
