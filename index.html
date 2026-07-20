@@ -16,6 +16,10 @@
     --sh-sm:0 1px 3px rgba(60,50,30,.06);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body,.hero,.disc,.discwrap,.waves,nav,header,.tab,.btn{
+    -webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;
+    -webkit-touch-callout:none;touch-action:manipulation}
+  input,textarea,.note-txt,table{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
   html,body{margin:0;height:100%}
   body{
     background:linear-gradient(180deg, var(--bg2) 0%, var(--bg) 40%);
@@ -53,7 +57,7 @@
 
   /* HOME — yatay (üst/alt) bölme */
   .split{display:flex;flex-direction:column;height:calc(100vh - 154px);gap:16px;margin-top:4px}
-  .hero{flex:1;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  .hero{flex:1;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:14px;border-radius:28px;overflow:hidden;cursor:pointer;border:1px solid var(--line);
     background:var(--card);box-shadow:var(--sh);transition:transform .14s ease}
   .hero:active{transform:scale(.987)}
@@ -363,11 +367,14 @@ function bindHold(el,opts={}){
     e.preventDefault(); clearTimeout(holdTimer);
     if(held){ stopVoice(); autoSaveVoice(); }
   };
-  el.addEventListener('pointerdown',down);
+  el.addEventListener('pointerdown',e=>{ try{el.setPointerCapture(e.pointerId);}catch(_){}; down(e); });
   el.addEventListener('pointerup',up);
   el.addEventListener('pointercancel',up);
-  el.addEventListener('pointerleave',e=>{ if(held){clearTimeout(holdTimer); stopVoice();} });
-  el.addEventListener('contextmenu',e=>e.preventDefault());
+  el.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+  el.addEventListener('touchend',e=>e.preventDefault(),{passive:false});
+  el.addEventListener('contextmenu',e=>{e.preventDefault();return false;});
+  el.addEventListener('selectstart',e=>e.preventDefault());
+  el.addEventListener('dragstart',e=>e.preventDefault());
 }
 
 
