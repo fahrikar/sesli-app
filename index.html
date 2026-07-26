@@ -7,6 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
@@ -163,7 +164,9 @@
     <div id="reminderBox"></div>
     <div class="card" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div><div class="muted" style="font-size:12px">Aktif şantiye</div><div id="aktifSantiye" style="font-weight:600">Şantiye seçilmedi</div></div>
-      <button class="btn sm ghost" onclick="go('sites')">Değiştir</button>
+      <div class="row"><button class="btn sm ghost" onclick="siteKalemEkle()">+ Kalem</button>
+      <button class="btn sm ghost" onclick="siteKalemDuzenle()">Kalemler</button>
+      <button class="btn sm ghost" onclick="go('sites')">Değiştir</button></div>
     </div>
     <div class="split">
       <div class="hero mic" id="micHero">
@@ -347,17 +350,93 @@
 
 
 
+
+/* ============================================================
+   ÖDEME YÖNTEMİ + ZORUNLU BELGE
+   ============================================================ */
+const ODEME_YONTEMLERI=[
+  {k:'nakit',   ad:'Nakit',          belge:false},
+  {k:'havale',  ad:'Banka Havalesi', belge:true, belgeAd:'Dekont'},
+  {k:'cek',     ad:'Çek',            belge:true, belgeAd:'Çek görseli'},
+  {k:'kredi',   ad:'Kredi Kartı',    belge:true, belgeAd:'Kart fişi'}
+];
+let PENDING_DOC=null;        // {dataUrl}
+let PENDING_METHOD='nakit';
+
+function odemeSecHTML(){
+  return '<label>Ödeme yöntemi</label>'
+    +'<div id="odemeBtns" class="row" style="margin-bottom:4px">'
+    +ODEME_YONTEMLERI.map(o=>'<button type="button" class="btn sm '+(o.k==='nakit'?'':'ghost')+'" data-m="'+o.k+'" onclick="secOdeme(\''+o.k+'\')">'+o.ad+'</button>').join('')
+    +'</div>'
+    +'<div id="docArea" style="display:none;margin-top:8px">'
+    +'<label id="docLabel">Belge</label>'
+    +'<div class="row"><label class="btn sm ghost" style="text-align:center">📷 Belge Ekle'
+    +'<input type="file" accept="image/*" capture="environment" style="display:none" onchange="pickDoc(event)"></label>'
+    +'<span id="docState" class="muted" style="align-self:center"></span></div>'
+    +'<img id="docThumb" style="display:none;max-width:120px;border-radius:10px;margin-top:8px">'
+    +'</div>';
+}
+function secOdeme(k){
+  PENDING_METHOD=k;
+  document.querySelectorAll('#odemeBtns button').forEach(b=>{
+    b.className='btn sm '+(b.dataset.m===k?'':'ghost');
+  });
+  const o=ODEME_YONTEMLERI.find(x=>x.k===k);
+  const area=document.getElementById('docArea');
+  if(o.belge){ area.style.display='block'; document.getElementById('docLabel').textContent=o.belgeAd+' (zorunlu)'; }
+  else{ area.style.display='none'; PENDING_DOC=null; }
+}
+function pickDoc(ev){
+  const f=ev.target.files&&ev.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    // küçült
+    const img=new Image();
+    img.onload=()=>{
+      const mx=1000,sc=Math.min(1,mx/img.width);
+      const c=document.createElement('canvas'); c.width=img.width*sc; c.height=img.height*sc;
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      PENDING_DOC={dataUrl:c.toDataURL('image/jpeg',0.7)};
+      const th=document.getElementById('docThumb'); th.src=PENDING_DOC.dataUrl; th.style.display='block';
+      document.getElementById('docState').textContent='✓ Belge eklendi';
+    };
+    img.src=r.result;
+  };
+  r.readAsDataURL(f);
+}
+/* belge şartı: müdür için zorunlu, patron için değil */
+function belgeGerekliMi(){
+  const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
+  if(!o||!o.belge)return false;
+  if(CURRENT&&CURRENT.rol==='patron')return false; // patron muaf
+  return true;
+}
+async function uploadDoc(noteId){
+  if(!PENDING_DOC)return null;
+  // buluta yükle
+  if(cloudOn&&stg){
+    try{
+      const ref=stg.ref('belgeler/'+noteId+'.jpg');
+      await ref.putString(PENDING_DOC.dataUrl,'data_url');
+      return await ref.getDownloadURL();
+    }catch(e){ console.warn('belge yüklenemedi',e); }
+  }
+  // bulut yoksa data url'i kayda göm
+  return PENDING_DOC.dataUrl;
+}
+function resetOdeme(){ PENDING_METHOD='nakit'; PENDING_DOC=null; }
+
 /* ============================================================
    AI CÜMLE ANLAMA (Claude API üzerinden)
    Anahtar index.html'e konmaz; küçük bir Cloudflare Worker
    üzerinden çağrılır. Worker adresini buraya yaz:
    ============================================================ */
-const AI_ENDPOINT="sesli-ai.fahrikarayigit.workers.dev"; // örn: https://xxx.workers.dev
+const AI_ENDPOINT="BURAYA_WORKER_ADRESI"; // örn: https://xxx.workers.dev
 
 function aiHazir(){ return AI_ENDPOINT && AI_ENDPOINT!=="BURAYA_WORKER_ADRESI"; }
 
 async function aiParse(cumle){
-  const kalemler=GIDER_KALEMLERI.join(', ');
+  const kalemler=aktifKalemler().join(', ');
   const bugun=todayStr();
   const prompt=
 `Sen bir şantiye gider takip asistanısın. Kullanıcının söylediği Türkçe cümleyi analiz et ve gider kalemlerine ayır.
@@ -398,17 +477,21 @@ Cümle: "${cumle}"`;
 let AI_PENDING=null;
 async function processWithAI(txt){
   const lb=document.getElementById('liveBox');
+  // AI kurulu değilse: sessiz yedek olarak kural bazlı çözümle, yine onaya sun
+  if(!aiHazir()){
+    const items=parseItems(txt).filter(i=>i.known);
+    showAiConfirm(items,txt,true);
+    return;
+  }
   if(lb){lb.style.display='block';lb.innerHTML='<div class="muted" style="padding:12px">Yapay zekâ cümleyi çözümlüyor…</div>';}
   try{
     const items=await aiParse(txt);
     if(lb){lb.style.display='none';lb.innerHTML='';}
-    if(!items.length){ showAiConfirm([],txt); return; }
     showAiConfirm(items,txt);
   }catch(e){
     if(lb){lb.style.display='none';lb.innerHTML='';}
-    // AI hata verirse kural bazlıya düş
-    const items=parseItems(txt);
-    showAiConfirm(items.filter(i=>i.known),txt,true);
+    const items=parseItems(txt).filter(i=>i.known);
+    showAiConfirm(items,txt,true);
   }
 }
 function showAiConfirm(items,rawText,fallback){
@@ -433,16 +516,32 @@ function showAiConfirm(items,rawText,fallback){
       +(it.odemeGunu?'<div class="muted">Ödeme günü: '+escapeHtml(it.odemeGunu)+'</div>':'')
       +'</div>';
   });
+  resetOdeme();
   html+=(fallback?'<div class="muted" style="margin-top:8px">(AI bağlanamadı, basit çözümleme kullanıldı)</div>':'')
+    +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+odemeSecHTML()+'</div>'
     +'<div class="row" style="margin-top:14px"><button class="btn sm green" onclick="confirmAi()">Onayla</button>'
     +'<button class="btn sm ghost" onclick="cancelAi()">İptal</button></div></div>';
   box.innerHTML=html;
-  speak('Onaylıyor musun?','kayit');
+  // cümleyi ve algılananları sesli tekrar et
+  const ozet=items.map(it=>it.category+' '+Math.round(it.amount).toLocaleString('tr-TR')
+      +(it.kisi?' '+it.kisi:'')+(it.odemeGunu?' ödeme günü '+it.odemeGunu:'')).join(', ');
+  speak('Şunu anladım: '+ozet+'. Onaylıyor musun?','kayit');
+  sesleOnayDinle(()=>confirmAi(), ()=>cancelAi());
 }
 async function confirmAi(){
+  onayDinlemeDur();
   if(!AI_PENDING)return;
+  if(belgeGerekliMi()&&!PENDING_DOC){
+    const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
+    alert('⚠️ '+o.ad+' için '+(o.belgeAd||'belge')+' zorunlu. Fotoğraf ekle, sonra onayla.');
+    speak('Belge gerekli. Lütfen '+(o.belgeAd||'belge')+' ekle.','kayit');
+    return;
+  }
   const noteId=Date.now();
+  const belgeUrl=await uploadDoc(noteId);
+  const yontem=(ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD)||{}).ad||'Nakit';
   const yeni={id:noteId,type:'ai',text:AI_PENDING.rawText,items:AI_PENDING.items,
+    odeme:yontem,belge:belgeUrl||null,
     siteId:AKTIF_SANTIYE,createdAt:new Date().toISOString()};
   NOTES.unshift(yeni); await Store.set('notes',NOTES); pushCloudNote(yeni);
   // ödeme günü olanları çek hatırlatmasına ekle
@@ -460,7 +559,7 @@ async function confirmAi(){
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Kaydedildi</div>';
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2500);
 }
-function cancelAi(){ AI_PENDING=null; const b=document.getElementById('confirmBox'); b.style.display='none'; b.innerHTML=''; speak('İptal edildi.','kayit'); }
+function cancelAi(){ onayDinlemeDur(); AI_PENDING=null; const b=document.getElementById('confirmBox'); b.style.display='none'; b.innerHTML=''; speak('İptal edildi.','kayit'); }
 
 /* ============================================================
    ŞANTİYE & GİDER KALEMLERİ
@@ -493,7 +592,7 @@ async function addSite(){
     const idx=parseInt(secim,10)-1;
     mudurId=(mudurler[idx]||mudurler[0]).mudurId;
   }
-  const site={id:'s'+Date.now(),ad:ad.trim(),mudurId};
+  const site={id:'s'+Date.now(),ad:ad.trim(),mudurId,kalemler:GIDER_KALEMLERI.slice()};
   SITES.push(site); await Store.set('sites',SITES);
   if(cloudOn)db.ref('sites/'+site.id).set(site);
   renderSites();
@@ -525,6 +624,29 @@ async function delGiderKalemi(ad){
   await Store.set('giderKalemleri',GIDER_KALEMLERI);
   if(cloudOn)db.ref('giderKalemleri').set(GIDER_KALEMLERI);
   renderSites();
+}
+function aktifKalemler(){
+  const s=SITES.find(x=>x.id===AKTIF_SANTIYE);
+  return (s&&s.kalemler&&s.kalemler.length)?s.kalemler:GIDER_KALEMLERI;
+}
+async function siteKalemEkle(){
+  const s=SITES.find(x=>x.id===AKTIF_SANTIYE); if(!s){alert('Önce şantiye aç.');return;}
+  const ad=prompt('Yeni gider kalemi:',''); if(!ad||!ad.trim())return;
+  s.kalemler=s.kalemler||GIDER_KALEMLERI.slice();
+  if(!s.kalemler.includes(ad.trim()))s.kalemler.push(ad.trim());
+  await Store.set('sites',SITES); if(cloudOn)db.ref('sites/'+s.id).set(s);
+  alert('Eklendi: '+ad.trim());
+}
+async function siteKalemDuzenle(){
+  const s=SITES.find(x=>x.id===AKTIF_SANTIYE); if(!s){alert('Önce şantiye aç.');return;}
+  s.kalemler=s.kalemler||GIDER_KALEMLERI.slice();
+  const liste=s.kalemler.map((k,i)=>(i+1)+') '+k).join('\n');
+  const sil=prompt('Silmek için numara gir (birden fazla: 1,3):\n\n'+liste,'');
+  if(!sil)return;
+  const idx=sil.split(',').map(x=>parseInt(x.trim(),10)-1).filter(x=>x>=0);
+  s.kalemler=s.kalemler.filter((_,i)=>!idx.includes(i));
+  await Store.set('sites',SITES); if(cloudOn)db.ref('sites/'+s.id).set(s);
+  alert('Güncellendi.');
 }
 function siteTotals(siteId){
   let t=0,c=0;
@@ -582,13 +704,14 @@ const ROLES={
 };
 
 let CURRENT=null;          // {rol, ad, mudurId}
-let db=null, cloudOn=false;
+let db=null, stg=null, cloudOn=false;
 
 function initFirebase(){
   try{
     if(FIREBASE_CONFIG.apiKey==='BURAYA_YAPISTIR')return false;
     firebase.initializeApp(FIREBASE_CONFIG);
     db=firebase.database();
+    try{ stg=firebase.storage(); }catch(e){ stg=null; }
     firebase.auth().signInAnonymously().catch(()=>{});
     cloudOn=true; return true;
   }catch(e){ console.warn('Firebase yok:',e); return false; }
@@ -695,7 +818,19 @@ async function startVoice(){
   const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   if(!SR){ st.innerHTML=isIOS?'⚠️ iPhone/iPad tarayıcısı canlı ses tanımayı desteklemiyor. Android Chrome ya da bilgisayarda Chrome kullan.':'⚠️ Bu tarayıcı ses tanımayı desteklemiyor. Chrome ile açmayı dene.'; return; }
   if(!window.isSecureContext){ st.textContent='⚠️ Mikrofon yalnızca güvenli bağlantıda (https) çalışır. Sayfayı https adresinden aç.'; return; }
-  try{ const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}}); s.getTracks().forEach(t=>t.stop()); }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(AC){ const ctx=new AC(); const src=ctx.createMediaStreamSource(stream);
+        const hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=120; // uğultu/motor bas sesini kes
+        const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=7500; // tiz gürültüyü yumuşat
+        src.connect(hp); hp.connect(lp); // sadece ısıtma/analiz; SpeechRecognition kendi akışını açar
+        setTimeout(()=>{try{ctx.close();}catch(e){}},400);
+      }
+    }catch(e){}
+    stream.getTracks().forEach(t=>t.stop());
+  }
   catch(e){ st.textContent='⚠️ Mikrofon izni verilmedi ('+e.name+'). Tarayıcıda bu siteye mikrofon iznini "İzin ver" yap.'; return; }
   recog=new SR(); recog.lang='tr-TR'; recog.continuous=true; recog.interimResults=true; recog.maxAlternatives=3;
   let base=document.getElementById('voiceText').value;
@@ -782,30 +917,23 @@ async function autoSaveVoice(){
         setTimeout(()=>{lb.style.display='none';lb.innerHTML='';},6000);}
       return;
     }
-    // AI hazırsa: serbest cümleyi Claude anlasın, onaya sun (herkes için)
-    if(aiHazir()){ document.getElementById('voiceText').value=''; processWithAI(txt); return; }
+    // HERKES (patron dahil): serbest cümle -> AI ayrıştırır -> onaya sunulur
+    document.getElementById('voiceText').value='';
+    if(lb){lb.style.display='none';lb.innerHTML='';}
+    processWithAI(txt);
+    return;
+    // (aşağısı artık kullanılmıyor - AI akışı devrede)
+    /* eslint-disable */
     const items=parseItems(txt);
     const bilinen=items.filter(i=>i.known), bilinmeyen=items.filter(i=>!i.known);
-    // MÜDÜR: sadece tanınanları, onaydan sonra gönder
-    if(CURRENT&&CURRENT.rol==='mudur'){
-      document.getElementById('voiceText').value='';
-      if(lb){lb.style.display='none';lb.innerHTML='';}
-      showManagerConfirm(bilinen,bilinmeyen,txt);
-      return;
-    }
+    if(false){
     const noteId=Date.now();
     const anomali=checkAnomalies(items,noteId);
     const yeni={id:noteId,type:'voice',text:txt,items,siteId:AKTIF_SANTIYE,createdAt:new Date().toISOString()};
     NOTES.unshift(yeni);
     await Store.set('notes',NOTES);
     pushCloudNote(yeni);
-    if(anomali.length){
-      const a=anomali[0];
-      speak('Dikkat. '+a.kategori+' için '+Math.round(a.tutar).toLocaleString('tr-TR')+' girildi. Ortalaman '+Math.round(a.ort).toLocaleString('tr-TR')+'. Kontrol et.','anomali');
     }
-    document.getElementById('voiceText').value='';
-    if(!anomali.length)sayItems(bilinen,bilinmeyen);
-    renderTable();
     if(lb){
       lb.style.display='block';
       lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;font-size:13px">'
@@ -885,33 +1013,48 @@ function showManagerConfirm(bilinen,bilinmeyen,rawText){
     return;
   }
   box.style.display='block';
+  resetOdeme();
   box.innerHTML='<div class="card" style="text-align:left">'
     +'<div style="font-weight:600;margin-bottom:8px">Gönderilecek</div>'
     +bilinen.map(i=>'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span>'+escapeHtml(i.known)+'</span><b>'+money(i.amount)+'</b></div>').join('')
     +(bilinmeyen.length?'<div class="muted" style="margin-top:8px">'+bilinmeyen.length+' kalem tanımsız, gönderilmeyecek.</div>':'')
+    +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+odemeSecHTML()+'</div>'
     +'<div class="row" style="margin-top:14px"><button class="btn sm green" onclick="confirmManager()">Onayla ve Gönder</button>'
-    +'<button class="btn sm ghost" onclick="cancelManager()">İptal</button></div></div>';
-  speak('Onaylıyor musun?','kayit');
+    +'<button class="btn sm ghost" onclick="cancelManager()">İptal</button></div>'
+    +'<div class="muted" style="margin-top:8px;font-size:12px">🎤 "evet" ya da "hayır" diyebilirsin.</div></div>';
+  const ozet2=bilinen.map(i=>i.known+' '+Math.round(i.amount).toLocaleString('tr-TR')).join(', ');
+  speak('Şunu anladım: '+ozet2+'. Onaylıyor musun?','kayit');
+  sesleOnayDinle(()=>confirmManager(), ()=>cancelManager());
 }
 async function confirmManager(){
+  onayDinlemeDur();
   if(!PENDING)return;
+  if(belgeGerekliMi()&&!PENDING_DOC){
+    const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
+    alert('⚠️ '+o.ad+' için '+(o.belgeAd||'belge')+' zorunlu. Fotoğraf ekle, sonra onayla.');
+    speak('Belge gerekli. Lütfen '+(o.belgeAd||'belge')+' ekle.','kayit');
+    return;
+  }
   const noteId=Date.now();
+  const belgeUrl=await uploadDoc(noteId);
+  const yontem=(ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD)||{}).ad||'Nakit';
   // SADECE tanınan kalemler gönderilir
   const yeni={id:noteId,type:'voice',text:PENDING.rawText,
     items:PENDING.bilinen.map(i=>({category:i.category,amount:i.amount,raw:i.raw,known:i.known,grup:i.grup})),
-    createdAt:new Date().toISOString()};
+    odeme:yontem,belge:belgeUrl||null,
+    siteId:AKTIF_SANTIYE,createdAt:new Date().toISOString()};
   NOTES.unshift(yeni);
   await Store.set('notes',NOTES);
   pushCloudNote(yeni);
   sayItems(PENDING.bilinen,[]);
-  PENDING=null;
+  PENDING=null; resetOdeme();
   renderTable();
   const box=document.getElementById('confirmBox');
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Gönderildi</div>';
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2500);
 }
 function cancelManager(){
-  PENDING=null;
+  onayDinlemeDur(); PENDING=null;
   const box=document.getElementById('confirmBox');
   box.style.display='none'; box.innerHTML='';
   speak('İptal edildi.','kayit');
@@ -1050,6 +1193,18 @@ async function reparseAll(){
 }
 
 /* ---------- SESLİ TEYİT ---------- */
+let TR_VOICE=null;
+function pickVoice(){
+  if(!('speechSynthesis'in window))return;
+  const vs=window.speechSynthesis.getVoices()||[];
+  const tr=vs.filter(v=>/tr(-|_)?/i.test(v.lang));
+  // kadın sesi ipuçları
+  const kadinAdlari=/(kadın|female|woman|yelda|filiz|seda|aylin|zeynep|elif|google türkçe|microsoft.*(tolga)?)/i;
+  TR_VOICE = tr.find(v=>kadinAdlari.test(v.name))
+          || tr.find(v=>/google/i.test(v.name))
+          || tr[0] || null;
+}
+if('speechSynthesis'in window){ window.speechSynthesis.onvoiceschanged=pickVoice; setTimeout(pickVoice,300); }
 function speak(text,tip){
   if(tip&&SETTINGS[tip]===false)return;
   if(!tip&&SETTINGS.kayit===false)return;
@@ -1057,7 +1212,9 @@ function speak(text,tip){
     if(!('speechSynthesis'in window))return;
     window.speechSynthesis.cancel();
     const u=new SpeechSynthesisUtterance(text);
-    u.lang='tr-TR'; u.rate=1.05; u.pitch=1;
+    u.lang='tr-TR'; u.rate=1.02; u.pitch=1.15;   // hafif tiz -> daha kadınsı
+    if(!TR_VOICE)pickVoice();
+    if(TR_VOICE)u.voice=TR_VOICE;
     window.speechSynthesis.speak(u);
   }catch(e){}
 }
@@ -1328,18 +1485,11 @@ async function saveNote(type){
   const el=type==='voice'?'voiceText':'ocrText';
   const txt=document.getElementById(el).value.trim();
   if(!txt){alert('Kaydedilecek metin yok.');return;}
-  const items=parseItems(txt);
-  if(CURRENT&&CURRENT.rol==='mudur'){
-    const bil=items.filter(i=>i.known), bilm=items.filter(i=>!i.known);
-    go('home');
-    showManagerConfirm(bil,bilm,txt);
-    document.getElementById(el).value='';
-    return;
-  }
-  const yeni={id:Date.now(),type,text:txt,items,createdAt:new Date().toISOString()};
-  NOTES.unshift(yeni);
-  await Store.set('notes',NOTES);
-  pushCloudNote(yeni);
+  // HERKES: metni AI ayrıştırsın, onaya sun
+  document.getElementById(el).value='';
+  go('home');
+  processWithAI(txt);
+  return;
   document.getElementById(el).value='';
   const bil=items.filter(i=>i.known), bilm=items.filter(i=>!i.known);
   alert((bil.length?'✅ '+bil.length+' kalem tanındı:\n'+bil.map(i=>'• '+i.known+': '+money(i.amount)).join('\n'):'✅ Kaydedildi.')
@@ -1529,6 +1679,38 @@ function exportSelected(fmtType){
 function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();}
 
 
+
+
+/* ---------- SESLE ONAY (evet/hayır dinle) ---------- */
+let onayRecog=null;
+function sesleOnayDinle(onEvet,onHayir){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return; // desteklemiyorsa butonlar zaten var
+  try{ if(onayRecog){onayRecog.abort();} }catch(e){}
+  // asistan konuşurken dinleme başlamasın; bitince başlat
+  const startWhenQuiet=()=>{
+    if(window.speechSynthesis&&window.speechSynthesis.speaking){ setTimeout(startWhenQuiet,250); return; }
+    try{
+      onayRecog=new SR(); onayRecog.lang='tr-TR'; onayRecog.interimResults=false; onayRecog.maxAlternatives=3;
+      let bitti=false;
+      const bit=(fn)=>{ if(bitti)return; bitti=true; try{onayRecog.stop();}catch(e){} fn&&fn(); };
+      onayRecog.onresult=e=>{
+        let heard='';
+        for(let i=0;i<e.results.length;i++)for(let a=0;a<e.results[i].length;a++)heard+=' '+e.results[i][a].transcript;
+        const t=trLower(heard);
+        if(/(evet|tamam|onayla|onaylıyorum|olur|kaydet|doğru|dogru|kabul|oldu)/.test(t)){ bit(onEvet); }
+        else if(/(hayır|hayir|iptal|vazgeç|vazgec|yanlış|yanlis|olmadı|olmadi|dur|sil)/.test(t)){ bit(onHayir); }
+      };
+      onayRecog.onerror=()=>{};
+      onayRecog.onend=()=>{ /* sessiz kalırsa bir şey yapma, butonlar durur */ };
+      onayRecog.start();
+      // 8 sn sonra otomatik kapan (karar butonlarda kalır)
+      setTimeout(()=>{ try{onayRecog&&onayRecog.stop();}catch(e){} },8000);
+    }catch(e){}
+  };
+  startWhenQuiet();
+}
+function onayDinlemeDur(){ try{ onayRecog&&onayRecog.abort(); }catch(e){} }
 
 /* ---------- SESLE STOK GİRİŞ / ÇIKIŞ ---------- */
 const OUT_W=['çıktı','cikti','çıkış','cikis','düş','dus','harcandı','harcandi','kullanıldı','kullanildi','gitti','verildi','azalt'];
