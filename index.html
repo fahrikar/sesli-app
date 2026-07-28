@@ -1471,6 +1471,79 @@ function wordsToNumbers(text){
   return out.join('').replace(/\s+/g,' ').trim();
 }
 
+/* ---------- TÜRKÇE VADE / TARİH ÇÖZÜMLEME ----------
+   "3 ay sonra salı günü", "2 hafta sonra", "gelecek ay", "15 eylül", "yarın"
+   Sadece GELECEĞE bakan ifadeler vade sayılır ("bugün", "dün" sayılmaz).      */
+const AY_ADLARI={ocak:0,'şubat':1,subat:1,mart:2,nisan:3,'mayıs':4,mayis:4,haziran:5,temmuz:6,
+  'ağustos':7,agustos:7,'eylül':8,eylul:8,ekim:9,'kasım':10,kasim:10,'aralık':11,aralik:11};
+const GUN_ADLARI={pazartesi:1,'salı':2,sali:2,'çarşamba':3,carsamba:3,'perşembe':4,persembe:4,
+  cumartesi:6,cuma:5,pazar:0};
+/* JS'te \b Türkçe harfleri (ı ş ç ö ü ğ) kelime karakteri saymaz;
+   "\bsalı\b" hiç eşleşmez. Bu yüzden sınırları elle tanımlıyoruz. */
+const TRW='\\wçğıöşüÇĞİÖŞÜ';
+function trKelimeRe(kaliplar){
+  return new RegExp('(?:^|[^'+TRW+'])('+kaliplar+')(?!['+TRW+'])','i');
+}
+function gunEkle(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
+function ayEkle(d,n){
+  const x=new Date(d), gun=x.getDate();
+  x.setDate(1); x.setMonth(x.getMonth()+n);
+  const sonGun=new Date(x.getFullYear(),x.getMonth()+1,0).getDate();
+  x.setDate(Math.min(gun,sonGun));           // 31 Ocak + 1 ay -> 28/29 Şubat
+  return x;
+}
+/* Metinden vadeyi çıkarır; {tarih:'YYYY-AA-GG', kalan:'tarih ifadesi silinmiş metin'} */
+function tarihAyikla(text){
+  let t=text, tarih=null, base=new Date(); base.setHours(0,0,0,0);
+  const sil=[];
+  const yakala=(re,fn)=>{
+    if(tarih)return;
+    const m=trLower(t).match(re);
+    if(m){ const r=fn(m); if(r){ tarih=r; sil.push(m[0]); } }
+  };
+  // "15 eylül" / "15 eylülde"
+  yakala(/(\d{1,2})\s*(ocak|şubat|subat|mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)\w*/,m=>{
+    const g=parseInt(m[1],10), a=AY_ADLARI[m[2]];
+    if(a===undefined||g<1||g>31)return null;
+    let d=new Date(base.getFullYear(),a,g);
+    if(d<base)d=new Date(base.getFullYear()+1,a,g);   // geçmişse gelecek yıl
+    return d;
+  });
+  // "3 ay sonra", "2 hafta sonra", "10 gün sonra", "1 yıl sonra"
+  yakala(/(\d+)\s*(gün|gun|hafta|ay|yıl|yil|sene)\s*sonra/,m=>{
+    const n=parseInt(m[1],10); if(!n)return null;
+    const b=m[2];
+    if(/gün|gun/.test(b))return gunEkle(base,n);
+    if(/hafta/.test(b))  return gunEkle(base,n*7);
+    if(/ay/.test(b))     return ayEkle(base,n);
+    return ayEkle(base,n*12);
+  });
+  // "yarın", "haftaya", "gelecek/önümüzdeki hafta|ay|yıl"
+  yakala(trKelimeRe('yarın|yarin'),()=>gunEkle(base,1));
+  yakala(trKelimeRe('öbür gün|obur gun'),()=>gunEkle(base,2));
+  yakala(trKelimeRe('haftaya|gelecek hafta|önümüzdeki hafta|onumuzdeki hafta'),()=>gunEkle(base,7));
+  yakala(trKelimeRe('gelecek ay|önümüzdeki ay|onumuzdeki ay'),()=>ayEkle(base,1));
+  yakala(trKelimeRe('gelecek yıl|gelecek yil|seneye'),()=>ayEkle(base,12));
+  // gün adı: "salı günü" — varsa bulunan tarihten sonraki ilk o gün
+  const gm=trLower(t).match(trKelimeRe('pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cumartesi|cuma|pazar'));
+  if(gm){
+    const hedef=GUN_ADLARI[gm[1]];
+    if(hedef!==undefined){
+      let d=tarih?new Date(tarih):new Date(base);
+      let fark=(hedef-d.getDay()+7)%7;
+      if(fark===0&&!tarih)fark=7;             // "salı" dendi, bugün salıysa haftaya
+      tarih=gunEkle(d,fark);
+      sil.push(gm[0]);
+    }
+  }
+  if(!tarih)return {tarih:null,kalan:text};
+  // tarih ifadelerini metinden çıkar ki tutar sanılmasın
+  let kalan=t;
+  sil.forEach(p=>{ kalan=kalan.replace(new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i'),' '); });
+  kalan=kalan.replace(/\b(günü|gunu|sonra|tarihinde|de|da)\b/gi,' ').replace(/\s+/g,' ').trim();
+  return {tarih:todayStr(tarih), kalan};
+}
+
 /* ---------- YAZIM HATASINA DAYANIKLI EŞLEŞTİRME ---------- */
 function lev(a,b){
   a=trLower(a); b=trLower(b);
@@ -1590,6 +1663,8 @@ async function tumSes(ac){
 /* ---------- TANIMLI KATEGORİLER (sadece bunlar Excel'e gider) ---------- */
 const CATEGORY_MAP=[
   {ad:'Emanet',            grup:'Kasa',                       kelimeler:['emanet']},
+  {ad:'Alacak (Verilen Borç)', grup:'Borç/Alacak',            kelimeler:['alacak','verilen borç','borç verdim','ödünç verdim']},
+  {ad:'Borç (Alınan)',     grup:'Borç/Alacak',                kelimeler:['borç aldım','ödünç aldım','alınan borç']},
   {ad:'Çek',               grup:'Ödeme',                      kelimeler:['çek','cek']},
   {ad:'Tahsilat',          grup:'Gelir',                      kelimeler:['tahsilat','tahsil','gelir','ödeme aldım']},
   {ad:'Ev Gideri',         grup:'Gider',                      kelimeler:['ev gider','ev gideri','ev harcama','ev masraf']},
@@ -1645,9 +1720,51 @@ function toNumber(str){
 const LABEL_FILLER=/(^|\s)(bugün|bugun|dün|dun|yarın|yarin|de|da|te|ta|ile|için|icin|tl|lira|liralık|liralik|adet|tane|toplam|olarak|kadar|para|tutar|bir|de bir|ödedim|odedim|ödendi|odendi|ödedik|verdim|verildi|verdik|aldım|aldim|aldık|harcadım|harcadim|harcandı|harcandi|gitti|geldi|oldu|olsun|yaptım|yaptim|çektim|cektim|sonra|ayrıca|ayrica|örneğin|ornegin)(?=\s|$)/gi;
 function stripFiller(s){ let p=null,c=s||''; while(p!==c){p=c;c=c.replace(LABEL_FILLER,' ');} return c.replace(/\s+/g,' ').trim(); }
 
+/* ---------- BORÇ / ALACAK ----------
+   "Mehmet'e 5 milyon verdim 3 ay sonra salı günü verecek"  -> Alacak
+   "Ahmetten 20 bin borç aldım"                              -> Borç          */
+const BORC_KEL=/(borç|borc|ödünç|odunc|alacak|emanet)/i;
+const GERI_VERECEK=/(verecek|ödeyecek|odeyecek|getirecek|geri verecek|geri ödeyecek)/i;
+const ALDIM_KEL=/(ald[ıi]m|ald[ıi]k|çektim|cektim)/i;
+/* Cümle bir borç/alacak kaydı mı? Yönünü de döndürür. */
+function borcTespit(text){
+  const t=trLower(text);
+  const borcKelime=BORC_KEL.test(t), geriVerecek=GERI_VERECEK.test(t);
+  if(!borcKelime&&!geriVerecek)return null;
+  // "borç aldım" / "ödünç aldım" -> bizim borcumuz; diğer hallerde alacak
+  const bizAldik=borcKelime&&ALDIM_KEL.test(t)&&!geriVerecek;
+  return bizAldik?'borc':'alacak';
+}
+/* Kişi adını yakalar: "mehmete", "Mehmet'e", "ahmetten" -> Mehmet / Ahmet */
+const KISI_EKLERI=/('?(y[ea]|[ea]|d[ae]n|t[ae]n|nin|n[ıi]n|in|[ıi]n|ye|ya))$/i;
+function kisiAyikla(text){
+  const atla=/^(bugün|bugun|dün|dun|yarın|yarin|sonra|günü|gunu|lira|tl|adet|tane|toplam|para|borç|borc|ödünç|odunc|alacak|emanet|geri|hafta|ay|yıl|yil|sene|için|icin|olarak|kadar)$/i;
+  const kelimeler=text.split(/\s+/).filter(Boolean);
+  for(const ham of kelimeler){
+    const k=ham.replace(/[^\wçğıöşüÇĞİÖŞÜ']/g,'');
+    if(k.length<4||/\d/.test(k))continue;
+    if(atla.test(trLower(k)))continue;
+    if(matchCategory(k))continue;                 // kategori kelimesiyse kişi değil
+    const kok=k.replace(KISI_EKLERI,'');
+    if(kok.length<3)continue;
+    if(matchCategory(kok))continue;
+    if(atla.test(trLower(kok)))continue;
+    // ekle çekimlenmişse ya da baş harfi büyükse kişi say
+    const cekimli=kok.length<k.length, buyuk=/^[A-ZÇĞİÖŞÜ]/.test(ham);
+    if(!cekimli&&!buyuk)continue;
+    return kok.charAt(0).toLocaleUpperCase('tr-TR')+trLower(kok.slice(1));
+  }
+  return null;
+}
+
 /* Doğal cümleyi anla: tutarları bul, her birini en yakın kategori kelimesiyle eşleştir */
 function parseItems(text){
-  const clean=wordsToNumbers(text)
+  const sayili=wordsToNumbers(text);
+  // Vadeyi önce ayıkla ki "3 ay sonra" içindeki 3 tutar sanılmasın
+  const vade=tarihAyikla(sayili);
+  const borcYonu=borcTespit(sayili);
+  const kisi=borcYonu?kisiAyikla(vade.kalan):null;
+  const clean=vade.kalan
       .replace(/\bve\b/gi,' ')
       .replace(/[,;:!?]/g,' ')
       .replace(/\s+/g,' ').trim();
@@ -1704,6 +1821,17 @@ function parseItems(text){
     out.push({category:label,amount:f.num,raw:(before+f.raw).replace(/\s+/g,' ').trim(),
               known:mc?mc.ad:null, grup:mc?mc.grup:null});
   });
+  // Borç/alacak cümlesiyse en büyük kalemi bu kategoriye al, kişi ve vadeyi ekle
+  if(borcYonu&&out.length){
+    const hedef=out.reduce((a,b)=>b.amount>a.amount?b:a,out[0]);
+    hedef.category=hedef.known=(borcYonu==='alacak'?'Alacak (Verilen Borç)':'Borç (Alınan)');
+    hedef.grup='Borç/Alacak';
+    hedef.borcYonu=borcYonu;
+    if(kisi)hedef.kisi=kisi;
+    if(vade.tarih)hedef.odemeGunu=vade.tarih;
+  }else if(vade.tarih&&out.length){
+    out[out.length-1].odemeGunu=vade.tarih;   // vade söylenmişse son kaleme bağla
+  }
   return out;
 }
 function money(n){return n.toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:2})+' ₺'}
@@ -1898,6 +2026,7 @@ function renderHomeStats(){
     const gunu=(n.createdAt||'').slice(0,10);
     (n.items||[]).forEach(it=>{
       if(!it.known)return;                       // sadece tanınan kalemler
+      if(it.grup==='Borç/Alacak')return;         // borç/alacak gider sayılmaz
       const tutar=it.amount||0;
       genelToplam+=tutar;
       if(gunu===bugun)bugunToplam+=tutar;
@@ -1913,6 +2042,46 @@ function renderHomeStats(){
     +'<div style="font-weight:700;font-size:16px;margin-top:2px">'+money(val)+'</div></div>';
   box.innerHTML=kutu('Bugün',bugunToplam)+kutu(ikinci.ad,ikinci.val);
 }
+/* ---------- BORÇ / ALACAK DÖKÜMÜ ---------- */
+function borcAlacakKalemleri(){
+  const out=[];
+  NOTES.forEach(n=>(n.items||[]).forEach((it,idx)=>{
+    const yon=it.borcYonu||(it.grup==='Borç/Alacak'
+      ? (/alacak/i.test(it.known||it.category||'')?'alacak':'borc') : null);
+    if(!yon)return;
+    out.push({noteId:n.id,idx,yon,kisi:it.kisi||'—',tutar:it.amount||0,
+              vade:it.odemeGunu||null,tarih:n.createdAt});
+  }));
+  return out.sort((a,b)=>(a.vade||'9999').localeCompare(b.vade||'9999'));
+}
+function renderBorcAlacak(){
+  const list=borcAlacakKalemleri();
+  if(!list.length)return '';
+  const alacak=list.filter(x=>x.yon==='alacak').reduce((a,b)=>a+b.tutar,0);
+  const borc  =list.filter(x=>x.yon==='borc').reduce((a,b)=>a+b.tutar,0);
+  const satir=x=>{
+    const g=x.vade?daysUntil(x.vade):null;
+    const durum=x.vade
+      ? (g<0?'<span class="pill" style="color:#b23b34">'+(-g)+' gün geçti</span>'
+            :g===0?'<span class="pill" style="color:#a9761e">bugün</span>'
+            :g===1?'<span class="pill" style="color:#a9761e">yarın</span>'
+            :'<span class="pill">'+g+' gün</span>')
+      : '<span class="pill">vade yok</span>';
+    return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--line)">'
+      +'<div style="flex:1"><div style="font-weight:500">'+escapeHtml(x.kisi)+' '+durum+'</div>'
+      +'<div class="muted" style="font-size:12px">'+(x.yon==='alacak'?'alacak':'borç')
+        +(x.vade?' · '+fmtDate(x.vade):'')+'</div></div>'
+      +'<div style="text-align:right;white-space:nowrap"><b style="color:'+(x.yon==='alacak'?'var(--ok)':'var(--danger)')+'">'
+        +(x.yon==='alacak'?'+':'−')+money(x.tutar)+'</b></div></div>';
+  };
+  return '<div class="card"><div style="font-weight:600;margin-bottom:2px">Borç / Alacak</div>'
+    +'<div class="muted" style="margin-bottom:6px">'+list.length+' kayıt</div>'
+    +list.map(satir).join('')
+    +'<div style="display:flex;justify-content:space-between;padding:10px 0 2px;border-top:2px solid var(--line);margin-top:6px;font-weight:600">'
+      +'<span>Net</span><span>'+money(alacak-borc)+'</span></div>'
+    +'<div class="muted" style="display:flex;justify-content:space-between">'
+      +'<span>Alacak '+money(alacak)+'</span><span>Borç '+money(borc)+'</span></div></div>';
+}
 function renderNotes(){ renderTable(); }
 function renderTable(){
   renderHomeStats();
@@ -1923,7 +2092,9 @@ function renderTable(){
     tarih:fmt(n.createdAt),kategori:it.known||it.category,grup:it.grup||'—',
     tutar:it.amount,taninan:!!it.known,anomali:!!it.anomali,mudur:n.mudur||''})));
   if(!rows.length){box.innerHTML='<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>';return;}
-  const toplam=rows.filter(r=>r.taninan).reduce((a,b)=>a+b.tutar,0);
+  // Borç/alacak gider değildir; kendi kartında toplanır, gider toplamına girmez
+  const toplam=rows.filter(r=>r.taninan&&r.grup!=='Borç/Alacak').reduce((a,b)=>a+b.tutar,0);
+  const borcVar=rows.some(r=>r.grup==='Borç/Alacak');
   const unk=rows.filter(r=>!r.taninan).length;
   let html='<div class="card" style="padding:0;overflow:hidden">'
    +'<table style="width:100%;border-collapse:collapse;font-size:13px">'
@@ -1945,7 +2116,8 @@ function renderTable(){
         +'<span onclick="delRow('+r.noteId+','+r.idx+')" style="cursor:pointer;color:#b23b34;font-size:16px">×</span></td></tr>';
   });
   html+='<tr style="border-top:2px solid var(--line);background:#faf6ee">'
-    +'<td colspan="2" style="padding:11px 8px;font-weight:700">TOPLAM</td>'
+    +'<td colspan="2" style="padding:11px 8px;font-weight:700">TOPLAM'
+      +(borcVar?'<div class="muted" style="font-weight:400;font-size:11px">borç/alacak hariç</div>':'')+'</td>'
     +'<td style="padding:11px 8px;text-align:right;font-weight:700">'+money(toplam)+'</td><td></td></tr>';
   html+='</tbody></table></div>';
   // sesli teyit anahtarı
@@ -1972,6 +2144,7 @@ function renderTable(){
      +'<button class="btn sm" onclick="backupAll()">Yedek Al</button>'
      +'<label class="btn sm ghost" style="text-align:center">Geri Yükle'
      +'<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)"></label></div></div>'
+     +renderBorcAlacak()
      +html;
 
   // tanımsız kalemleri öğretme
