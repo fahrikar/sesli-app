@@ -1158,6 +1158,18 @@ function go(id){
    Mikrofon ana ekranda olduğu için, mesaj yalnızca gizli ekrana yazılırsa
    kullanıcı hiçbir şey olmuyor sanıyor. */
 let recog=null, listening=false, sonHata='';
+/* iPhone/iPad: Safari ve iOS'taki tüm tarayıcılar SpeechRecognition'ı
+   desteklemez. Bunun yerine iOS'un KLAVYE DİKTESİ kullanılır — ana ekrana
+   eklenmiş uygulamada da çalışır ve Türkçesi iyidir. */
+const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||
+          (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+function dikteAc(){
+  go('voice');
+  const ta=document.getElementById('voiceText');
+  const st=document.getElementById('voiceStatus');
+  if(st)st.innerHTML='⌨️ Klavyedeki <b>🎤</b> tuşuna basıp konuşun. Bitince <b>Kaydet</b>\'e dokunun.';
+  if(ta){ ta.value=''; ta.focus(); }   // dokunuş jesti içinde odaklan ki klavye açılsın
+}
 function sesDurum(mesaj,tur){
   const st=document.getElementById('voiceStatus');
   if(st)st.innerHTML=mesaj;
@@ -2949,7 +2961,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · ses teşhis';
+const SURUM='2026-07-28 · iPhone dikte';
 
 /* Service worker: uygulama gibi kurulsun, internet yokken de açılsın ve
    GÜNCELLEMELER KENDİLİĞİNDEN İNSİN (silip yeniden kurmaya gerek kalmadan). */
@@ -2999,7 +3011,16 @@ if('serviceWorker'in navigator){
   await loadFabrika();
   if('Notification'in window&&Notification.permission==='default'){try{Notification.requestPermission();}catch(e){}}
   checkReminders();
-  bindHold(document.getElementById('micHero'),{});
+  // Ses girişi: Android'de basılı tut/konuş, iPhone'da klavye diktesi
+  const hero=document.getElementById('micHero');
+  if(IOS){
+    hero.addEventListener('click',e=>{ if(e.target.closest('button'))return; dikteAc(); });
+    const h=hero.querySelector('h3'); if(h)h.textContent='Sesle Yaz';
+    const ip=document.getElementById('micHint');
+    if(ip)ip.innerHTML='Dokun, klavyedeki 🎤 ile konuş';
+  }else{
+    bindHold(hero,{});
+  }
 })();
 </script>
 </body>
