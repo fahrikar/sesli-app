@@ -412,13 +412,17 @@
   <section class="screen" id="muhasebe">
     <h2>Muhasebe</h2>
     <div class="tabs">
-      <div class="tab on" id="mTab1" onclick="muhTab('evrak')">Evrak</div>
+      <div class="tab on" id="mTab0" onclick="muhTab('belgeler')">Belgeler</div>
+      <div class="tab" id="mTab1" onclick="muhTab('evrak')">Evrak</div>
       <div class="tab" id="mTab2" onclick="muhTab('kdv')">KDV</div>
       <div class="tab" id="mTab3" onclick="muhTab('cari')">Cari</div>
     </div>
     <div class="card">
-      <button class="btn" onclick="muhasebeciPaketi()">📦 Muhasebeci Paketi (Excel)</button>
-      <div class="muted" style="margin-top:6px">Seçili dönemin tüm gider, satış, KDV ve belge listesini indirir.</div>
+      <div style="font-weight:600;margin-bottom:2px">Muhasebeciye Gönder</div>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">
+        Klasör dosyası: taranan tüm evrakın fotoğrafları + döküm listesi tek dosyada.</div>
+      <button class="btn" onclick="belgeKlasoruIndir()">📁 Evrak Klasörü İndir (ZIP)</button>
+      <button class="btn ghost" style="margin-top:8px" onclick="muhasebeciPaketi()">📊 Sadece Excel Dökümü</button>
     </div>
     <div id="muhBox"></div>
   </section>
@@ -1455,10 +1459,11 @@ function logout(){
 function applyRole(){
   const patron=CURRENT.rol==='patron';
   const fabrika=CURRENT.rol==='fabrika';
-  // müdür sadece "Kayıt" (home + tablo) görsün; diğer nav gizlensin
-  ['nReports','nStock','nPayments','nMuh'].forEach(id=>{
+  // müdür rapor/stok/çek görmesin; Muhasebe (evrak) herkeste açık
+  ['nReports','nStock','nPayments'].forEach(id=>{
     const el=document.getElementById(id); if(el)el.style.display=patron?'':'none';
   });
+  const nM=document.getElementById('nMuh'); if(nM)nM.style.display='';
   // fabrika müdüründe şantiye sekmesi gizli, fabrika sekmesi görünür
   const nS=document.getElementById('nSites'); if(nS)nS.style.display=(patron||!fabrika)?'':'none';
   const nF=document.getElementById('nFab'); if(nF)nF.style.display=(patron||fabrika)?'':'none';
@@ -3575,6 +3580,7 @@ function exportFullTemplate(){
 /* ---------- MUHASEBE EKRANI ---------- */
 let muhSekme='evrak';
 function muhTab(t){muhSekme=t;
+  document.getElementById('mTab0').classList.toggle('on',t==='belgeler');
   document.getElementById('mTab1').classList.toggle('on',t==='evrak');
   document.getElementById('mTab2').classList.toggle('on',t==='kdv');
   document.getElementById('mTab3').classList.toggle('on',t==='cari');
@@ -3587,9 +3593,70 @@ function tumGiderItems(){
 }
 function renderMuhasebe(){
   const box=document.getElementById('muhBox'); if(!box)return;
+  if(muhSekme==='belgeler')return renderBelgeler(box);
   if(muhSekme==='evrak')return renderEvrak(box);
   if(muhSekme==='kdv')return renderKdv(box);
   if(muhSekme==='cari')return renderCari(box);
+}
+
+/* ---------- TARANAN EVRAK ARŞİVİ ---------- */
+/* Müdür kendi evrakını, patron hepsini görür */
+function benimKayitlarim(){
+  if(CURRENT&&CURRENT.rol==='patron')return NOTES;
+  return NOTES.filter(n=>n.mudurId===(CURRENT&&CURRENT.mudurId)||!n.mudurId);
+}
+function belgeliKayitlar(){
+  return benimKayitlarim().filter(n=>n.belge)
+    .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+function belgeDosyaAdi(n){
+  const t=(n.createdAt||'').slice(0,10);
+  const kalem=(n.items||[]).filter(i=>i.known).map(i=>i.known).join('-')||'Belge';
+  const tutar=Math.round((n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0));
+  const santiye=(SITES.find(s=>s.id===n.siteId)||{}).ad||(n.fabrika?'Fabrika':'');
+  return [t,santiye,kalem,tutar+'TL'].filter(Boolean).join('_')
+    .replace(/[\\/:*?"<>|]/g,'-').replace(/\s+/g,'-')+'.jpg';
+}
+function renderBelgeler(box){
+  const list=belgeliKayitlar();
+  const eksik=benimKayitlarim().filter(n=>!n.belge&&(n.items||[]).some(i=>i.known)).length;
+  if(!list.length){
+    box.innerHTML='<div class="empty">Henüz taranmış evrak yok.<br>Kamera ekranından belge tarayın ya da gider kaydına fotoğraf ekleyin.</div>'
+      +(eksik?'<div class="banner">'+eksik+' kaydın belgesi eksik.</div>':'');
+    return;
+  }
+  const toplam=list.reduce((a,n)=>a+(n.items||[]).reduce((x,y)=>x+(y.known?y.amount:0),0),0);
+  box.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between">'
+      +'<span>Taranan evrak</span><b>'+list.length+' belge</b></div>'
+      +'<div style="display:flex;justify-content:space-between;padding-top:6px"><span class="muted">Toplam tutar</span>'
+      +'<b>'+money(toplam)+'</b></div>'
+      +(eksik?'<div class="muted" style="margin-top:8px;color:#a9761e">'+eksik+' kaydın belgesi eksik.</div>':'')
+      +'</div>'
+    +'<div class="card"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px">'
+    +list.map(n=>{
+        const kalem=(n.items||[]).filter(i=>i.known).map(i=>i.known).join(', ')||'Belge';
+        const tutar=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
+        return '<div style="cursor:pointer" onclick="belgeAc('+n.id+')">'
+          +'<img src="'+n.belge+'" loading="lazy" style="width:100%;height:104px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:#fff">'
+          +'<div style="font-size:11px;font-weight:500;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(kalem)+'</div>'
+          +'<div class="muted" style="font-size:10px">'+fmt(n.createdAt).split(' ')[0]+' · '+money(tutar)+'</div></div>';
+      }).join('')
+    +'</div></div>';
+}
+function belgeAc(id){
+  const n=NOTES.find(x=>x.id===id); if(!n||!n.belge)return;
+  const kalem=(n.items||[]).filter(i=>i.known).map(i=>i.known).join(', ')||'Belge';
+  const tutar=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
+  const box=document.getElementById('confirmBox');
+  box.style.display='block';
+  box.innerHTML='<div class="card" style="text-align:left">'
+    +'<div style="font-weight:600">'+escapeHtml(kalem)+'</div>'
+    +'<div class="muted" style="font-size:12px;margin-bottom:10px">'+fmt(n.createdAt)+' · '+money(tutar)
+      +(n.odeme?' · '+escapeHtml(n.odeme):'')+(n.mudur?' · '+escapeHtml(n.mudur):'')+'</div>'
+    +'<img src="'+n.belge+'" style="width:100%;border-radius:12px;border:1px solid var(--line)">'
+    +'<div class="row" style="margin-top:12px">'
+      +'<button class="btn sm ghost" onclick="document.getElementById(\'confirmBox\').style.display=\'none\'">Kapat</button>'
+      +'<button class="btn sm ghost" onclick="belgeEkleKayda('+n.id+')">🔄 Değiştir</button></div></div>';
 }
 /* 1) EVRAK - eksik belge uyarısı + belgeli arşiv */
 function renderEvrak(box){
@@ -3663,6 +3730,94 @@ function renderCari(box){
   box.innerHTML=html;
 }
 /* MUHASEBECİ PAKETİ - kapsamlı Excel */
+/* ---------- ZIP OLUŞTURUCU (kütüphanesiz, sıkıştırmasız) ----------
+   Fotoğraflar zaten JPEG olduğu için sıkıştırma kazancı yok; "store"
+   yöntemi hem hızlı hem de harici kütüphane gerektirmiyor (çevrimdışı çalışır). */
+const ZIP_CRC=(()=>{const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}
+  return t;})();
+function zipCrc32(buf){let c=0xFFFFFFFF;for(let i=0;i<buf.length;i++)c=ZIP_CRC[(c^buf[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function zipOlustur(dosyalar){          // [{ad, veri:Uint8Array}]
+  const enc=new TextEncoder();
+  const parcalar=[], merkez=[];
+  let ofset=0;
+  const yaz=(...b)=>{const a=new Uint8Array(b.length);a.set(b);return a;};
+  const u16=v=>yaz(v&255,(v>>8)&255);
+  const u32=v=>yaz(v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255);
+  const birlestir=arr=>{let n=0;arr.forEach(a=>n+=a.length);const o=new Uint8Array(n);let p=0;arr.forEach(a=>{o.set(a,p);p+=a.length;});return o;};
+  dosyalar.forEach(d=>{
+    const ad=enc.encode(d.ad);              // UTF-8 (bayrak bit 11 ile işaretlenir)
+    const crc=zipCrc32(d.veri), boy=d.veri.length;
+    const yerel=birlestir([u32(0x04034b50),u16(20),u16(0x0800),u16(0),u16(0),u16(0),
+                           u32(crc),u32(boy),u32(boy),u16(ad.length),u16(0),ad,d.veri]);
+    parcalar.push(yerel);
+    merkez.push(birlestir([u32(0x02014b50),u16(20),u16(20),u16(0x0800),u16(0),u16(0),u16(0),
+                           u32(crc),u32(boy),u32(boy),u16(ad.length),u16(0),u16(0),u16(0),u16(0),u32(0),
+                           u32(ofset),ad]));
+    ofset+=yerel.length;
+  });
+  const md=birlestir(merkez);
+  const son=birlestir([u32(0x06054b50),u16(0),u16(0),u16(dosyalar.length),u16(dosyalar.length),
+                       u32(md.length),u32(ofset),u16(0)]);
+  return new Blob([birlestir(parcalar),md,son],{type:'application/zip'});
+}
+function dataUrlToBytes(u){
+  const i=u.indexOf(',');
+  const b=atob(u.slice(i+1));
+  const a=new Uint8Array(b.length);
+  for(let k=0;k<b.length;k++)a[k]=b.charCodeAt(k);
+  return a;
+}
+/* Muhasebeciye tek dosya: tüm evrak fotoğrafları + döküm listesi */
+async function belgeKlasoruIndir(){
+  const list=belgeliKayitlar();
+  if(!list.length){alert('Taranmış evrak yok.');return;}
+  const btnKutu=document.getElementById('muhBox');
+  const eski=btnKutu.innerHTML;
+  btnKutu.innerHTML='<div class="card" style="text-align:center">Evrak klasörü hazırlanıyor… <b id="zipIlerleme">0/'+list.length+'</b></div>'+eski;
+  const dosyalar=[], satirlar=[];
+  const enc=new TextEncoder();
+  for(let i=0;i<list.length;i++){
+    const n=list[i];
+    const ad=belgeDosyaAdi(n);
+    try{
+      let veri;
+      if(/^data:/.test(n.belge))veri=dataUrlToBytes(n.belge);
+      else{ const res=await fetch(n.belge); veri=new Uint8Array(await res.arrayBuffer()); }
+      dosyalar.push({ad:'Evraklar/'+ad,veri});
+    }catch(e){ /* okunamayan belge atlanır, listede işaretlenir */ }
+    const tutar=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
+    const oran=(n.kdvOran==null?20:n.kdvOran), k=kdvAyir(tutar,oran);
+    satirlar.push([
+      fmt(n.createdAt).split(' ')[0],
+      (SITES.find(s=>s.id===n.siteId)||{}).ad||(n.fabrika?'Fabrika':''),
+      (n.items||[]).filter(x=>x.known).map(x=>x.known).join(', '),
+      tutar, oran+'%', k.matrah, k.kdv,
+      n.odeme||'', n.mudur||'', ad
+    ]);
+    const p=document.getElementById('zipIlerleme'); if(p)p.textContent=(i+1)+'/'+list.length;
+  }
+  // Excel dökümü de pakete girsin
+  try{
+    const wb=XLSX.utils.book_new();
+    const ws=XLSX.utils.aoa_to_sheet([['Tarih','Şantiye','Kalem','Brüt Tutar','KDV Oranı','Matrah','KDV','Ödeme','Kaydeden','Dosya Adı']].concat(satirlar));
+    ws['!cols']=[{wch:12},{wch:16},{wch:26},{wch:13},{wch:10},{wch:13},{wch:12},{wch:15},{wch:12},{wch:40}];
+    XLSX.utils.book_append_sheet(wb,ws,'Evrak Listesi');
+    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+    dosyalar.push({ad:'00_Evrak_Listesi.xlsx',veri:new Uint8Array(wbout)});
+  }catch(e){
+    const csv='Tarih;Şantiye;Kalem;Tutar;KDV Oranı;Matrah;KDV;Ödeme;Kaydeden;Dosya\n'
+      +satirlar.map(r=>r.join(';')).join('\n');
+    dosyalar.push({ad:'00_Evrak_Listesi.csv',veri:enc.encode('﻿'+csv)});
+  }
+  const blob=zipOlustur(dosyalar);
+  const kim=CURRENT&&CURRENT.rol!=='patron'?('_'+CURRENT.ad):'';
+  dl(blob,'Evraklar'+kim+'_'+todayStr()+'.zip');
+  btnKutu.innerHTML=eski;
+  renderMuhasebe();
+  alert('✓ '+list.length+' evrak paketlendi.\n\nZIP dosyasını WhatsApp veya e-posta ile muhasebeciye gönderebilirsiniz.');
+}
+
 function muhasebeciPaketi(){
   const its=tumGiderItems();
   if(!its.length&&!NOTES.some(n=>n.satis)){alert('Aktarılacak kayıt yok.');return;}
@@ -3770,7 +3925,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · kullanıcılar';
+const SURUM='2026-07-28 · evrak arşivi';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
