@@ -475,6 +475,7 @@ function pickDoc(ev){
 function belgeGerekliMi(items){
   const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
   if(!o||!o.belge)return false;
+  if(CURRENT&&CURRENT.rol==='fabrika')return false; // fabrika müdürü (Ömer) muaf
   const kontrolluKalem=(items||[]).some(i=>belgeZorunluKategori(i.known||i.category));
   if(kontrolluKalem)return true;                    // kategori bazlı zorunluluk
   if(CURRENT&&CURRENT.rol==='patron')return false;  // diğer kalemlerde patron muaf
@@ -644,14 +645,16 @@ function showSatisConfirm(sat,rawText){
   const box=document.getElementById('confirmBox'); if(!box)return;
   SATIS_PENDING={sat,rawText};
   box.style.display='block';
-  box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">Söve Satışı</div>'
-    +'<div style="display:flex;justify-content:space-between;padding:5px 0"><span>Metrekare</span><b>'+sat.metrekare.toLocaleString('tr-TR')+' m²</b></div>'
-    +'<div style="display:flex;justify-content:space-between;padding:5px 0"><span>m² fiyatı</span><span>'+money(sat.fiyat)+'</span></div>'
+  const miktarStr=(sat.miktar!=null)?sat.miktar.toLocaleString('tr-TR')+' '+(sat.birim||''):null;
+  box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">'+escapeHtml(sat.urun||'Satış')+' Satışı</div>'
+    +(miktarStr?'<div style="display:flex;justify-content:space-between;padding:5px 0"><span>Miktar</span><b>'+escapeHtml(miktarStr)+'</b></div>':'')
+    +(sat.birimFiyat?'<div style="display:flex;justify-content:space-between;padding:5px 0"><span>Birim fiyat</span><span>'+money(sat.birimFiyat)+' / '+escapeHtml(sat.birim||'')+'</span></div>':'')
     +'<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);font-weight:700"><span>Tutar</span><span>'+money(sat.tutar)+'</span></div>'
     +'<div class="row" style="margin-top:12px"><button class="btn sm green" onclick="confirmSatis()">Onayla</button>'
     +'<button class="btn sm ghost" onclick="cancelSatis()">İptal</button></div>'
     +'<div class="muted" style="margin-top:8px;font-size:12px">🎤 "evet" ya da "hayır" diyebilirsin.</div></div>';
-  speak('Söve satışı. '+sat.metrekare+' metrekare, '+Math.round(sat.tutar).toLocaleString('tr-TR')+' lira. Onaylıyor musun?','kayit');
+  speak((sat.urun||'')+' satışı. '+(miktarStr?miktarStr+', ':'')
+    +Math.round(sat.tutar).toLocaleString('tr-TR')+' lira. Onaylıyor musun?','kayit');
   sesleOnayDinle(()=>confirmSatis(), ()=>cancelSatis());
 }
 async function confirmSatis(){
@@ -660,7 +663,8 @@ async function confirmSatis(){
   const yeni={id:noteId,type:'satis',fabrika:true,mudurId:CURRENT.mudurId,
     satis:SATIS_PENDING.sat,text:SATIS_PENDING.rawText,items:[],createdAt:new Date().toISOString()};
   NOTES.unshift(yeni); await Store.set('notes',NOTES); pushCloudNote(yeni);
-  speak(SATIS_PENDING.sat.metrekare+' metrekare satış kaydedildi.','kayit');
+  const s=SATIS_PENDING.sat;
+  speak((s.urun||'')+' satışı kaydedildi. '+Math.round(s.tutar).toLocaleString('tr-TR')+' lira.','kayit');
   SATIS_PENDING=null; renderFabrika();
   const box=document.getElementById('confirmBox');
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Satış kaydedildi</div>';
@@ -705,27 +709,86 @@ async function setSoveFiyat(){
   SOVE_FIYAT=n; await Store.set('soveFiyat',n); if(cloudOn)db.ref('soveFiyat').set(n);
   alert('Söve m² fiyatı: '+money(n)); renderFabrika();
 }
-function isSatis(text){
-  const t=trLower(text);
-  return /(sat[ıi]ld[ıi]|satt[ıi]m|sat[ıi]ş|metrekare|metre kare|m2|m²|metreкare)/.test(t) && /(söve|sove|ströfor|strafor)/.test(t);
+/* Fabrikada satılan ürünler ve ölçü birimleri */
+const FABRIKA_URUNLERI=[
+  {ad:'Söve',     kelimeler:['söve','sove','ströfor','strafor','stropor']},
+  {ad:'Köşebent', kelimeler:['köşebent','kosebent','köşe bent','köşebend','kösebent']},
+  {ad:'Boya',     kelimeler:['boya','astar','vernik']},
+  {ad:'Denizlik', kelimeler:['denizlik']},
+  {ad:'Sütun',    kelimeler:['sütun','sutun','kolon']},
+  {ad:'Kemer',    kelimeler:['kemer']},
+  {ad:'Silme',    kelimeler:['silme','kordon','kordonlu']}
+];
+const SATIS_BIRIMLERI=[
+  {b:'m²',    kelimeler:['m2','m²','metrekare','metre kare','metre²']},
+  {b:'adet',  kelimeler:['adet','tane']},
+  {b:'kova',  kelimeler:['kova']},
+  {b:'kg',    kelimeler:['kg','kilo','kilogram']},
+  {b:'paket', kelimeler:['paket']},
+  {b:'torba', kelimeler:['torba','çuval','cuval']},
+  {b:'m',     kelimeler:['metre','mt']},
+  {b:'takım', kelimeler:['takım','takim','set']}
+];
+const PARA_KEL=/^(tl|lira|₺|liray[ae]|liradan)$/i;
+function birimBul(kelime){
+  const w=trLower(kelime||'');
+  const f=SATIS_BIRIMLERI.find(u=>u.kelimeler.some(k=>trLower(k)===w));
+  return f?f.b:null;
 }
+function isSatis(text){
+  return /(sat[ıi]ld[ıi]|satt[ıi]m|sat[ıi]ş|satt[ıi]k|sat[ıi]yorum)/i.test(trLower(text));
+}
+/* "150 m2 söve satıldı 36.350 TL" · "köşebent satıldı 5 adet 17.000 TL"
+   "9 kova boya satıldı 1000 TL"  →  {urun, miktar, birim, tutar, birimFiyat} */
 function parseSatis(text){
-  const t=trLower(wordsToNumbers(text));
-  // metrekare miktarını yakala
-  const m=t.match(/(\d+(?:[.,]\d+)*)\s*(m2|m²|metre\s*kare|metrekare)?/);
-  let mk=m?toNumber(m[1]):null;
-  if(!mk)return null;
-  return {metrekare:mk, fiyat:SOVE_FIYAT, tutar:mk*SOVE_FIYAT};
+  const t=trLower(wordsToNumbers(text)).replace(/(\d)\s*(m2|m²)/g,'$1 $2');
+  // ürün adı
+  let urun=null,enIyi=0;
+  FABRIKA_URUNLERI.forEach(u=>u.kelimeler.forEach(k=>{
+    const sc=fuzzyHas(t,k); if(sc>enIyi){enIyi=sc;urun=u.ad;}
+  }));
+  // sayıları ve hemen ardındaki kelimeyi topla
+  const re=/(\d+(?:[.,]\d+)*)\s*(m2|m²|[^\s\d]+)?/g;   // m2/m² rakam içerdiği için ayrıca yazıldı
+  const miktarlar=[],tutarlar=[],cikanlar=[];
+  let m;
+  while((m=re.exec(t))!==null){
+    const sayi=toNumber(m[1]); if(sayi===null)continue;
+    const ard=(m[2]||'').replace(/[.,;:]$/,'');
+    const birim=birimBul(ard);
+    if(birim)      miktarlar.push({sayi,birim});
+    else if(PARA_KEL.test(ard)) tutarlar.push(sayi);
+    else           cikanlar.push(sayi);
+  }
+  const mik=miktarlar[0]||null;
+  // tutar: "TL" ile işaretlenen; yoksa birim almamış son sayı
+  let tutar=tutarlar.length?tutarlar[tutarlar.length-1]:(cikanlar.length?cikanlar[cikanlar.length-1]:null);
+  // eski davranış: sadece m² söylenmişse sabit söve fiyatından hesapla
+  if(tutar===null&&mik&&urun==='Söve'&&SOVE_FIYAT)tutar=mik.sayi*SOVE_FIYAT;
+  if(tutar===null||tutar<=0)return null;
+  const miktar=mik?mik.sayi:null, birim=mik?mik.birim:null;
+  return {urun:urun||'Diğer', miktar, birim, tutar,
+          birimFiyat:(miktar?Math.round((tutar/miktar)*100)/100:null),
+          // eski kayıtlarla uyum için
+          metrekare:(birim==='m²'?miktar:null), fiyat:(birim==='m²'&&miktar?tutar/miktar:SOVE_FIYAT)};
 }
 function fabrikaTotals(){
   let satis=0,gider=0,m2=0;
+  const urunler={};   // {urun: {birim, miktar, tutar, adet}}
   NOTES.forEach(n=>{
     if(n.fabrika){
-      if(n.satis){satis+=n.satis.tutar||0; m2+=n.satis.metrekare||0;}
+      if(n.satis){
+        const s=n.satis;
+        satis+=s.tutar||0;
+        if(s.metrekare)m2+=s.metrekare;                       // eski kayıtlar
+        const ad=s.urun||'Söve';                              // eski kayıtlar söve idi
+        const g=urunler[ad]=urunler[ad]||{birim:s.birim||(s.metrekare?'m²':''),miktar:0,tutar:0,adet:0};
+        g.miktar+=(s.miktar!=null?s.miktar:(s.metrekare||0));
+        g.tutar+=s.tutar||0; g.adet++;
+      }
       else (n.items||[]).forEach(it=>{if(it.known)gider+=it.amount;});
     }
   });
-  return {satis,gider,m2};
+  return {satis,gider,m2,urunler};
 }
 function renderFabrika(){
   const box=document.getElementById('fabList'); if(!box)return;
@@ -736,14 +799,23 @@ function renderFabrika(){
     +'<div><div class="muted" style="font-size:12px">Söve m² fiyatı'+(patron&&omer?' · '+escapeHtml(omer.ad):'')+'</div><div style="font-weight:600">'+(SOVE_FIYAT?money(SOVE_FIYAT):'ayarlanmadı')+'</div></div>'
     +(patron?'':'<button class="btn sm ghost" onclick="setSoveFiyat()">Fiyat Ayarla</button>')+'</div></div>';
   html+='<div class="card"><div style="display:flex;justify-content:space-between;padding:6px 0"><span>Toplam Satış</span><b style="color:var(--ok)">'+money(t.satis)+'</b></div>'
-    +'<div class="muted">'+t.m2.toLocaleString('tr-TR')+' m² söve</div>'
+    +Object.keys(t.urunler).map(ad=>{const g=t.urunler[ad];
+        return '<div class="muted" style="display:flex;justify-content:space-between;padding:2px 0">'
+          +'<span>'+escapeHtml(ad)+(g.miktar?' · '+g.miktar.toLocaleString('tr-TR')+' '+escapeHtml(g.birim||''):'')+'</span>'
+          +'<span>'+money(g.tutar)+'</span></div>';}).join('')
     +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);margin-top:6px"><span>Toplam Gider</span><b style="color:var(--danger)">'+money(t.gider)+'</b></div>'
     +'<div style="display:flex;justify-content:space-between;padding:8px 0 0;font-weight:600"><span>Net</span><span>'+money(t.satis-t.gider)+'</span></div></div>';
   // son kayıtlar
   const fk=NOTES.filter(n=>n.fabrika).slice(0,20);
   html+=fk.map(n=>{
-    if(n.satis)return '<div class="card"><span class="pill" style="color:#0e8f84;background:#e5faf7">SATIŞ</span> '
-      +n.satis.metrekare.toLocaleString('tr-TR')+' m² · <b>'+money(n.satis.tutar)+'</b><div class="muted">'+fmt(n.createdAt)+'</div></div>';
+    if(n.satis){
+      const s=n.satis;
+      const mik=(s.miktar!=null?s.miktar:s.metrekare);
+      const birim=s.birim||(s.metrekare!=null?'m²':'');
+      return '<div class="card"><span class="pill" style="color:#0e8f84;background:#e5faf7">SATIŞ</span> '
+        +escapeHtml(s.urun||'Söve')+(mik!=null?' · '+mik.toLocaleString('tr-TR')+' '+escapeHtml(birim):'')
+        +' · <b>'+money(s.tutar)+'</b><div class="muted">'+fmt(n.createdAt)+'</div></div>';
+    }
     return '<div class="card"><span class="pill">GİDER</span> '
       +(n.items||[]).map(i=>escapeHtml(i.known||i.category)+' '+money(i.amount)).join(', ')
       +'<div class="muted">'+fmt(n.createdAt)+(n.odeme?' · '+escapeHtml(n.odeme):'')+'</div></div>';
@@ -1179,8 +1251,7 @@ async function autoSaveVoice(){
     // FABRİKA rolü: satış mı gider mi?
     if(CURRENT&&CURRENT.rol==='fabrika'&&isSatis(txt)){
       const sat=parseSatis(txt);
-      if(!sat||!sat.metrekare){ speak('Metrekare anlaşılamadı, tekrar söyle.','kayit'); return; }
-      if(!SOVE_FIYAT){ alert('Önce Fabrika ekranından söve m² fiyatını ayarla.'); speak('Önce söve fiyatını ayarla.','kayit'); return; }
+      if(!sat){ speak('Satış tutarı anlaşılamadı. Örnek: 150 metrekare söve satıldı 36 bin 350 lira.','kayit'); return; }
       showSatisConfirm(sat,txt);
       return;
     }
@@ -1362,7 +1433,8 @@ function wordsToNumbers(text){
   const toks=text.split(/(\s+)/);
   const out=[]; let cur=0, seg=0, active=false;
   let sonRakamIdx=-1;   // "15 bin" için: son yazılan düz rakamın out içindeki yeri
-  const flush=()=>{ if(active){ out.push(String(cur+seg)); cur=0; seg=0; active=false; } };
+  let sonCarpan=0;      // "36 bin 350" için: en son uygulanan çarpan
+  const flush=()=>{ if(active){ out.push(String(cur+seg)); cur=0; seg=0; active=false; sonCarpan=0; } };
   for(let i=0;i<toks.length;i++){
     const t=toks[i];
     if(/^\s+$/.test(t)){ if(!active)out.push(t); continue; }
@@ -1377,12 +1449,20 @@ function wordsToNumbers(text){
       // rakamla yazılmış sayı + çarpan: "15 bin" -> 15000
       if(!active&&sonRakamIdx>=0){
         const taban=toNumber(out[sonRakamIdx]);
-        if(taban!==null){ out[sonRakamIdx]=String(taban*m); sonRakamIdx=-1; continue; }
+        if(taban!==null){
+          out[sonRakamIdx]='';                 // düz rakamı akümülatöre taşı
+          cur+=taban*m; seg=0; active=true; sonCarpan=m; sonRakamIdx=-1; continue;
+        }
       }
-      cur+=(seg===0?1:seg)*m; seg=0; active=true; sonRakamIdx=-1; continue;
+      cur+=(seg===0?1:seg)*m; seg=0; active=true; sonCarpan=m; sonRakamIdx=-1; continue;
     }
     const duzRakam=/^\d+([.,]\d+)*$/.test(w);
-    if(duzRakam&&active){ flush(); sonRakamIdx=out.length; out.push(' '+t); continue; }
+    if(duzRakam&&active){
+      // "36 bin 350" -> 36350 (çarpandan küçük artık sayı toplanır)
+      const v=toNumber(w);
+      if(v!==null&&sonCarpan&&v<sonCarpan){ seg+=v; continue; }
+      flush(); sonRakamIdx=out.length; out.push(' '+t); continue;
+    }
     flush();
     sonRakamIdx=duzRakam?out.length:-1;
     out.push(t);
