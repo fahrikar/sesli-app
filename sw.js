@@ -34,6 +34,8 @@ self.addEventListener('fetch',e=>{
 
   // Firebase gerçek zamanlı bağlantısı önbelleklenmemeli
   if(/firebaseio|googleapis|gstatic\.com\/firebasejs/.test(req.url))return;
+  // Sürüm dosyası HER ZAMAN sunucudan okunur; önbelleğe hiç girmez
+  if(/surum\.json/.test(req.url))return;
 
   // Sayfa isteğinde tarayıcı önbelleğini atla: GitHub Pages HTML'i 10 dk
   // önbelleğe alıyor, aksi halde güncelleme geç iniyor.

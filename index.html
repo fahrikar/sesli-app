@@ -3163,6 +3163,26 @@ function checkReminders(){
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
 const SURUM='2026-07-28 · mikrofon izni';
 
+/* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
+   surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
+async function surumKontrol(){
+  try{
+    const r=await fetch('surum.json?t='+Date.now(),{cache:'no-store'});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!d||!d.surum)return;
+    if(d.surum===SURUM){ sessionStorage.removeItem('surumYenile'); return; }
+    if(sessionStorage.getItem('surumYenile'))return;   // döngüye girme
+    sessionStorage.setItem('surumYenile','1');
+    if(window.caches){ const k=await caches.keys(); await Promise.all(k.map(x=>caches.delete(x))); }
+    if('serviceWorker'in navigator){
+      const reg=await navigator.serviceWorker.getRegistration();
+      if(reg){ try{await reg.update();}catch(e){} if(reg.waiting)reg.waiting.postMessage('guncelle'); }
+    }
+    location.reload();
+  }catch(e){}
+}
+
 /* Service worker: uygulama gibi kurulsun, internet yokken de açılsın ve
    GÜNCELLEMELER KENDİLİĞİNDEN İNSİN (silip yeniden kurmaya gerek kalmadan). */
 if('serviceWorker'in navigator){
@@ -3187,7 +3207,6 @@ if('serviceWorker'in navigator){
           if(yeni.state==='installed'&&navigator.serviceWorker.controller)yeni.postMessage('guncelle');
         });
       });
-      // Uygulama her ön plana geldiğinde güncelleme var mı diye bak
       const kontrolEt=()=>{ try{reg.update();}catch(e){} };
       kontrolEt();
       document.addEventListener('visibilitychange',()=>{ if(!document.hidden)kontrolEt(); });
@@ -3195,6 +3214,10 @@ if('serviceWorker'in navigator){
     }).catch(()=>{});
   });
 }
+/* Sürüm kontrolü: açılışta, uygulama öne geldiğinde ve saatte bir */
+surumKontrol();
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden)surumKontrol(); });
+setInterval(surumKontrol,3600000);
 /* ---------- init ---------- */
 (async function(){
   initFirebase();
