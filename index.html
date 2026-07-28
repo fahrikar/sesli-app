@@ -2058,6 +2058,19 @@ function renderHomeStats(){
     +'<div style="font-weight:700;font-size:16px;margin-top:2px">'+money(val)+'</div></div>';
   box.innerHTML=kutu('Bugün',bugunToplam)+kutu(ikinci.ad,ikinci.val);
 }
+/* Elle güncelleme: otomatik akış takılırsa tek dokunuşla yeniden indir */
+async function guncellemeKontrol(){
+  try{
+    if('serviceWorker'in navigator){
+      const reg=await navigator.serviceWorker.getRegistration();
+      if(reg){ await reg.update(); if(reg.waiting)reg.waiting.postMessage('guncelle'); }
+    }
+    if(window.caches){ const k=await caches.keys(); await Promise.all(k.map(x=>caches.delete(x))); }
+  }catch(e){}
+  sessionStorage.removeItem('swYenilendi');
+  location.reload();
+}
+
 /* ---------- BORÇ / ALACAK DÖKÜMÜ ---------- */
 function borcAlacakKalemleri(){
   const out=[];
@@ -2159,7 +2172,11 @@ function renderTable(){
      +'<div class="row"><button class="btn sm ghost" onclick="logout()">Çıkış Yap</button>'
      +'<button class="btn sm" onclick="backupAll()">Yedek Al</button>'
      +'<label class="btn sm ghost" style="text-align:center">Geri Yükle'
-     +'<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)"></label></div></div>'
+     +'<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)"></label></div>'
+     +'<div class="muted" style="margin-top:10px;font-size:11px;display:flex;justify-content:space-between;align-items:center">'
+       +'<span>sürüm '+SURUM+'</span>'
+       +'<span onclick="guncellemeKontrol()" style="cursor:pointer;text-decoration:underline">güncelle</span></div>'
+     +'</div>'
      +renderBorcAlacak()
      +html;
 
@@ -2891,28 +2908,38 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · uygulama kurulumu';
+const SURUM='2026-07-28 · otomatik güncelleme';
 
-/* Service worker: uygulama gibi kurulabilsin ve internet yokken de açılsın.
-   Strateji önce-ağ olduğu için güncellemeler takılı kalmaz. */
+/* Service worker: uygulama gibi kurulsun, internet yokken de açılsın ve
+   GÜNCELLEMELER KENDİLİĞİNDEN İNSİN (silip yeniden kurmaya gerek kalmadan). */
 if('serviceWorker'in navigator){
+  // Sayfa açılırken zaten bir SW yönetiyorsa, sonradan gelen değişim
+  // gerçek bir güncellemedir; ilk kurulumda yenilemeye gerek yok.
+  const oncedenVardi=!!navigator.serviceWorker.controller;
+
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(!oncedenVardi)return;                       // ilk kurulum: yenileme yapma
+    if(sessionStorage.getItem('swYenilendi'))return; // döngüye girmeyi engelle
+    sessionStorage.setItem('swYenilendi','1');
+    location.reload();
+  });
+
   window.addEventListener('load',()=>{
     navigator.serviceWorker.register('sw.js').then(reg=>{
-      // yeni sürüm indiyse bir sonraki açılışta değil, hemen devreye girsin
+      const bekleyeniDevreyeAl=()=>{ if(reg.waiting)reg.waiting.postMessage('guncelle'); };
+      bekleyeniDevreyeAl();                        // önceden inmiş sürüm varsa
       reg.addEventListener('updatefound',()=>{
-        const yeni=reg.installing;
-        if(!yeni)return;
+        const yeni=reg.installing; if(!yeni)return;
         yeni.addEventListener('statechange',()=>{
-          if(yeni.state==='installed'&&navigator.serviceWorker.controller){
-            yeni.postMessage('guncelle');
-          }
+          if(yeni.state==='installed'&&navigator.serviceWorker.controller)yeni.postMessage('guncelle');
         });
       });
+      // Uygulama her ön plana geldiğinde güncelleme var mı diye bak
+      const kontrolEt=()=>{ try{reg.update();}catch(e){} };
+      kontrolEt();
+      document.addEventListener('visibilitychange',()=>{ if(!document.hidden)kontrolEt(); });
+      window.addEventListener('focus',kontrolEt);
     }).catch(()=>{});
-    let yenilendi=false;
-    navigator.serviceWorker.addEventListener('controllerchange',()=>{
-      if(yenilendi)return; yenilendi=true; location.reload();
-    });
   });
 }
 /* ---------- init ---------- */

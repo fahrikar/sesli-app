@@ -2,7 +2,7 @@
    Strateji: ÖNCE AĞ, sonra önbellek.
    Böylece her açılışta güncel sürüm iner; internet yoksa son kopya açılır.
    (Cache-first kullanılmıyor: eski sürümün telefonda takılı kalmasını istemiyoruz.) */
-const SURUM='sesli-v3';
+const SURUM='sesli-v4';
 const KABUK=[
   './',
   './index.html',
@@ -35,8 +35,14 @@ self.addEventListener('fetch',e=>{
   // Firebase gerçek zamanlı bağlantısı önbelleklenmemeli
   if(/firebaseio|googleapis|gstatic\.com\/firebasejs/.test(req.url))return;
 
+  // Sayfa isteğinde tarayıcı önbelleğini atla: GitHub Pages HTML'i 10 dk
+  // önbelleğe alıyor, aksi halde güncelleme geç iniyor.
+  const istek=(req.mode==='navigate'||/\.(html|json|js)$/.test(new URL(req.url).pathname))
+    ? new Request(req.url,{cache:'no-cache',credentials:'same-origin'})
+    : req;
+
   e.respondWith(
-    fetch(req)
+    fetch(istek)
       .then(res=>{
         // başarılı yanıtı kopyala ve sakla (offline yedeği)
         if(res&&res.status===200&&(res.type==='basic'||res.type==='cors')){
