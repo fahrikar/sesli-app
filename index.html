@@ -52,6 +52,42 @@
     border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;
   }
   header small{font-weight:400;color:var(--sub);font-size:12px}
+
+  /* MARKA — sayfanın krem/altın tonuyla uyumlu, alttan ışıklı */
+  .marka{
+    position:sticky;top:0;z-index:6;
+    background:linear-gradient(180deg,#fffdf8 0%, var(--bg2) 100%);
+    border-bottom:1px solid var(--line);
+    padding:14px 20px 13px;text-align:center;overflow:hidden;
+  }
+  .marka span{
+    position:relative;display:inline-block;
+    font-size:16px;font-weight:700;letter-spacing:.26em;text-indent:.26em;
+    text-transform:uppercase;
+    color:var(--graphite);                 /* gradient desteklenmezse düz renk */
+  }
+  /* gradient yazı yalnızca destekleniyorsa; aksi halde metin görünmez olurdu */
+  @supports ((-webkit-background-clip:text) or (background-clip:text)){
+    .marka span{
+      background:linear-gradient(175deg,var(--graphite) 0%,#7a6a4a 55%,var(--gold) 100%);
+      -webkit-background-clip:text;background-clip:text;
+      color:transparent;-webkit-text-fill-color:transparent;
+    }
+  }
+  /* yazının altından yükselen ışık */
+  .marka span::after{
+    content:'';position:absolute;left:50%;bottom:-9px;transform:translateX(-50%);
+    width:150%;height:16px;pointer-events:none;
+    background:radial-gradient(closest-side,rgba(201,167,101,.85),rgba(201,167,101,.18) 55%,transparent 78%);
+    filter:blur(3px);
+  }
+  /* ışığın oturduğu ince altın çizgi */
+  .marka::after{
+    content:'';position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+    width:64%;height:1px;
+    background:linear-gradient(90deg,transparent,var(--gold2),transparent);
+    box-shadow:0 0 10px 1px rgba(201,167,101,.5);
+  }
   main{flex:1;overflow-y:auto;padding-bottom:84px}
   .screen{display:none;padding:18px}
   .screen.active{display:block}
@@ -73,8 +109,11 @@
   h2{font-size:24px;font-weight:600;letter-spacing:-.02em;margin:4px 0 18px}
 
   /* HOME — yatay (üst/alt) bölme */
-  .split{display:flex;flex-direction:column;height:calc(100vh - 154px);gap:16px;margin-top:4px}
-  .hero{flex:1;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  /* Sabit yükseklik yerine esnek: marka çubuğu, üstteki kart ve alt menü
+     eklenince içerik alt menünün altına taşıyordu. */
+  .split{display:flex;flex-direction:column;gap:14px;margin-top:4px;
+    min-height:calc(100vh - 345px);min-height:calc(100dvh - 345px)}
+  .hero{flex:1;min-height:140px;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:14px;border-radius:28px;overflow:hidden;cursor:pointer;border:1px solid var(--line);
     background:var(--card);box-shadow:var(--sh);transition:transform .14s ease}
   .hero:active{transform:scale(.987)}
@@ -150,6 +189,7 @@
 </head>
 <body>
 
+<div class="marka"><span>Güner Muhasebe</span></div>
 <header>
   <span id="hdrTitle">Sesli &amp; Görsel Kayıt</span>
   <small id="hdrRight"></small>
@@ -3230,7 +3270,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · ana ekran açılış';
+const SURUM='2026-07-28 · Güner Muhasebe';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
