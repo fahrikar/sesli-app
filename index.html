@@ -1124,9 +1124,8 @@ function manageKalemler(){
 }
 function openSite(id){
   AKTIF_SANTIYE=id;
-  // Patron veri girmez; şantiyeyi yalnızca görüntüler
-  if(CURRENT&&CURRENT.rol==='patron'){ go('siteDetail'); return; }
-  go('home');
+  // Şantiye açılınca önce gider dökümü görünür; kayıt için ayrı buton var
+  go('siteDetail');
 }
 
 /* ---------- ŞANTİYE DETAYI (salt okunur) ---------- */
@@ -1153,8 +1152,12 @@ function renderSiteDetail(){
   if(!s){box.innerHTML='<div class="empty">Şantiye bulunamadı.</div>';return;}
   const o=santiyeOzet(s.id);
   const net=o.gelirToplam-o.giderToplam;
+  const patron=CURRENT&&CURRENT.rol==='patron';
 
-  let html='<div class="card">'
+  // Kayıt girenler için mikrofona geçiş (patron veri girmez)
+  let html=patron?'':'<button class="btn" style="margin-bottom:12px" onclick="go(\'home\')">🎤 Bu Şantiyeye Kayıt Ekle</button>';
+
+  html+='<div class="card">'
     +'<div style="display:flex;justify-content:space-between;padding:6px 0"><span>Toplam Gider</span>'
       +'<b style="color:var(--danger)">'+money(o.giderToplam)+'</b></div>'
     +(o.gelirToplam?'<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line)"><span>Toplam Gelir</span>'
@@ -3205,7 +3208,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · basılı tut';
+const SURUM='2026-07-28 · şantiye dökümü';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
