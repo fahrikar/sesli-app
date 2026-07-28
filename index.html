@@ -150,6 +150,7 @@
       <button class="btn" style="margin-top:14px" onclick="doLogin()">Gir</button>
       <div class="status" id="loginStatus"></div>
       <div id="cloudWarn" class="muted" style="margin-top:24px;font-size:12px"></div>
+      <div id="surumBilgi" class="muted" style="margin-top:10px;font-size:11px;opacity:.7"></div>
     </div>
   </section>
 
@@ -1766,7 +1767,9 @@ function parseItems(text){
   const kisi=borcYonu?kisiAyikla(vade.kalan):null;
   const clean=vade.kalan
       .replace(/\bve\b/gi,' ')
-      .replace(/[,;:!?]/g,' ')
+      // noktalama temizlenir; ama sayı içindeki ondalık virgül korunur ("3.000,00")
+      .replace(/[,;:!?]/g,(m,off,str)=>
+        (m===","&&/[0-9]/.test(str.charAt(off-1))&&/[0-9]/.test(str.charAt(off+1)))?m:" ")
       .replace(/\s+/g,' ').trim();
   // cümledeki tüm tutarları konumlarıyla topla
   const re=/(\d+(?:[.,]\d+)*)\s*(bin|milyon|milyar)?/gi;
@@ -2874,11 +2877,14 @@ function checkReminders(){
   }else box.innerHTML='';
 }
 
+/* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
+const SURUM='2026-07-28 · borç/alacak';
 /* ---------- init ---------- */
 (async function(){
   initFirebase();
   const cw=document.getElementById('cloudWarn');
   if(cw&&!cloudOn)cw.textContent='Bulut bağlı değil — girişler sadece bu cihazda kalır. (Firebase config eklenmedi)';
+  const sb=document.getElementById('surumBilgi'); if(sb)sb.textContent='sürüm '+SURUM;
   NOTES=await Store.get('notes',[]);
   PAYMENTS=await Store.get('payments',[]);
   LEXICON=await Store.get('lexicon',[]);
