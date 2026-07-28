@@ -817,7 +817,7 @@ async function kalemleriKaydet(items,rawText,opt){
     }
   });
   PAYMENTS.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
-  await Store.set('payments',PAYMENTS);
+  await Store.set('payments',PAYMENTS); pushOdemeler();
   renderTable();
   if(typeof renderFabrika==='function'&&CURRENT&&CURRENT.rol==='fabrika')renderFabrika();
   return {not:yeni,anomali};
@@ -1441,14 +1441,36 @@ function startCloud(){
     document.getElementById('cloudWarn').textContent='';
     return;
   }
+  const cw=document.getElementById('cloudWarn'); if(cw)cw.textContent='';
   if(CURRENT.rol==='patron'){
-    // tüm müdür girdilerini canlı dinle
+    // patron herkesin kaydını görür
     db.ref('kayitlar').on('value',snap=>{
       const val=snap.val()||{};
-      const cloudNotes=Object.keys(val).map(k=>val[k]).filter(Boolean);
-      mergeCloudNotes(cloudNotes);
+      mergeCloudNotes(Object.keys(val).map(k=>val[k]).filter(Boolean));
     });
+  }else{
+    /* Müdür yalnızca KENDİ kayıtlarını çeker: hem gizlilik hem veri
+       kullanımı için. Telefon değişse de kendi geçmişi geri gelir. */
+    db.ref('kayitlar').orderByChild('mudurId').equalTo(CURRENT.mudurId||'-')
+      .on('value',snap=>{
+        const val=snap.val()||{};
+        mergeCloudNotes(Object.keys(val).map(k=>val[k]).filter(Boolean));
+      });
   }
+  // stok ve çek ödemeleri herkeste ortak
+  db.ref('stok').on('value',async snap=>{
+    const v=snap.val(); if(!v)return;
+    STOCK=v.liste||[]; MOVES=v.hareket||[];
+    await Store.set('stock',STOCK); await Store.set('moves',MOVES);
+    if(document.getElementById('stock')&&document.getElementById('stock').classList.contains('active'))renderStock();
+  });
+  db.ref('odemeler').on('value',async snap=>{
+    const v=snap.val(); if(!v)return;
+    PAYMENTS=Array.isArray(v)?v:Object.values(v);
+    await Store.set('payments',PAYMENTS);
+    checkReminders();
+    if(document.getElementById('payments')&&document.getElementById('payments').classList.contains('active'))renderPayments();
+  });
 }
 function mergeCloudNotes(cloudNotes){
   // yerel + bulut birleştir (id'ye göre tekilleştir)
@@ -1467,6 +1489,20 @@ async function pushCloudNote(note){
     await db.ref('kayitlar/'+note.id).set(note);
   }catch(e){ console.warn('bulut yazılamadı',e); }
 }
+/* Var olan bir kaydın değişikliğini buluta yansıt (düzenleme/silme sonrası).
+   Bu olmadan patron eski hâli görmeye devam ediyordu. */
+async function syncNote(noteId){
+  if(!cloudOn||!db)return;
+  try{
+    const n=NOTES.find(x=>x.id===noteId);
+    if(n)await db.ref('kayitlar/'+noteId).set(n);
+    else await db.ref('kayitlar/'+noteId).remove();
+  }catch(e){ console.warn('bulut güncellenemedi',e); }
+}
+/* Stok ve çek ödemeleri de ortak olmalı: müdür sesle stok düşer,
+   patron aynı listeyi görmeli. */
+async function pushStok(){ if(cloudOn&&db)try{await db.ref('stok').set({liste:STOCK,hareket:MOVES});}catch(e){} }
+async function pushOdemeler(){ if(cloudOn&&db)try{await db.ref('odemeler').set(PAYMENTS);}catch(e){} }
 
 /* ---------- storage (kalıcı; yoksa hafızada) ---------- */
 const mem={};
@@ -2715,6 +2751,7 @@ async function mikrofonTesti(){
   box.innerHTML='<div class="card" style="text-align:left">'
     +'<div style="font-weight:600;margin-bottom:6px">Mikrofon Testi</div>'
     +sat('Sürüm',SURUM,true)
+    +sat('Bulut',cloudOn?'bağlı ✓':'BAĞLI DEĞİL (veriler sadece bu cihazda)',cloudOn)
     +sat('Cihaz',IOS?'iPhone/iPad':'Android/diğer',true)
     +sat('Tarayıcı',tarayici,tarayici==='Chrome'||tarayici==='Safari')
     +sat('Uygulama olarak açık',kurulu?'evet':'hayır (tarayıcıda)',true)
@@ -2910,7 +2947,7 @@ async function delRow(noteId,idx){
   const n=NOTES.find(x=>x.id===noteId); if(!n)return;
   n.items.splice(idx,1);
   if(!n.items.length&&!n.text)NOTES=NOTES.filter(x=>x.id!==noteId);
-  await Store.set('notes',NOTES); renderTable();
+  await Store.set('notes',NOTES); await syncNote(noteId); renderTable();
 }
 
 /* ---------- KALEM DÜZENLEME ---------- */
@@ -2940,6 +2977,7 @@ async function submitEdit(){
   it.amount=yeniTutar;
   delete it.anomali;
   await Store.set('notes',NOTES);
+  await syncNote(EDIT_TARGET.noteId);
   closeEdit(); renderTable();
   speak(yeniKat+' '+Math.round(yeniTutar).toLocaleString('tr-TR')+' olarak güncellendi.','kayit');
 }
@@ -3253,7 +3291,7 @@ async function addStock(){
     price:parseFloat(document.getElementById('stPrice').value)||0,
     createdAt:new Date().toISOString()
   };
-  STOCK.push(item); await Store.set('stock',STOCK);
+  STOCK.push(item); await Store.set('stock',STOCK); pushStok();
   if(item.qty)await logMove(item.id,'giris',item.qty,'Açılış stoğu');
   ['stName','stUnit','stQty','stMin','stPrice'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('stockForm').style.display='none';
@@ -3262,6 +3300,7 @@ async function addStock(){
 async function logMove(itemId,type,qty,note){
   MOVES.unshift({id:Date.now()+Math.random(),itemId,type,qty,note:note||'',at:new Date().toISOString()});
   await Store.set('moves',MOVES);
+  pushStok();
 }
 async function moveStock(id,type){
   const it=STOCK.find(x=>x.id===id); if(!it)return;
@@ -3271,13 +3310,13 @@ async function moveStock(id,type){
   if(isNaN(q)||q<=0){alert('Geçerli bir miktar gir.');return;}
   if(type==='cikis'&&q>it.qty&&!confirm('Stoktan fazla çıkış yapılıyor. Devam edilsin mi?'))return;
   it.qty=type==='giris'?it.qty+q:it.qty-q;
-  await Store.set('stock',STOCK); await logMove(id,type,q,'');
+  await Store.set('stock',STOCK); await logMove(id,type,q,''); pushStok();
   renderStock();
 }
 async function delStock(id){
   if(!confirm('Bu kalem silinsin mi?'))return;
   STOCK=STOCK.filter(x=>x.id!==id); MOVES=MOVES.filter(m=>m.itemId!==id);
-  await Store.set('stock',STOCK); await Store.set('moves',MOVES); renderStock();
+  await Store.set('stock',STOCK); await Store.set('moves',MOVES); pushStok(); renderStock();
 }
 function renderStock(){
   const tabs=document.getElementById('stockTabs');
@@ -3542,7 +3581,7 @@ async function addPayment(){
   if(!t||!d){alert('Açıklama ve tarih gerekli.');return;}
   PAYMENTS.push({id:Date.now(),title:t,amount:a,dueDate:d});
   PAYMENTS.sort((x,y)=>x.dueDate.localeCompare(y.dueDate));
-  await Store.set('payments',PAYMENTS);
+  await Store.set('payments',PAYMENTS); pushOdemeler();
   document.getElementById('payTitle').value='';document.getElementById('payAmount').value='';document.getElementById('payDate').value='';
   renderPayments();
   if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();
@@ -3595,7 +3634,7 @@ function renderPayments(){
 }
 function fmtDate(iso){const d=new Date(iso+'T00:00');return pad(d.getDate())+'.'+pad(d.getMonth()+1)+'.'+d.getFullYear()}
 function daysUntil(iso){const a=new Date(todayStr()+'T00:00');const b=new Date(iso+'T00:00');return Math.round((b-a)/86400000)}
-async function delPay(id){PAYMENTS=PAYMENTS.filter(p=>p.id!==id);await Store.set('payments',PAYMENTS);renderPayments();}
+async function delPay(id){PAYMENTS=PAYMENTS.filter(p=>p.id!==id);await Store.set('payments',PAYMENTS);pushOdemeler();renderPayments();}
 
 /* ---------- HATIRLATMA (1 gün önce) ---------- */
 function checkReminders(){
@@ -3610,7 +3649,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · belge yönlendirme';
+const SURUM='2026-07-28 · bulut hazır';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
