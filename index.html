@@ -420,9 +420,16 @@
     <div class="card">
       <div style="font-weight:600;margin-bottom:2px">Muhasebeciye Gönder</div>
       <div class="muted" style="font-size:12px;margin-bottom:10px">
-        Klasör dosyası: taranan tüm evrakın fotoğrafları + döküm listesi tek dosyada.</div>
-      <button class="btn" onclick="belgeKlasoruIndir()">📁 Evrak Klasörü İndir (ZIP)</button>
-      <button class="btn ghost" style="margin-top:8px" onclick="muhasebeciPaketi()">📊 Sadece Excel Dökümü</button>
+        Belgelerden ayıklanan bilgiler tek Excel tablosunda: belge no, firma, VKN,
+        matrah, KDV ve toplam. Fotoğraf gönderilmez.</div>
+      <button class="btn" onclick="muhasebeExcel()">📊 Muhasebe Excel'i İndir</button>
+      <div class="row" style="margin-top:8px">
+        <button class="btn sm ghost" onclick="tumBelgeleriAyikla()">🔍 Belgeleri Oku</button>
+        <button class="btn sm ghost" onclick="belgeKlasoruIndir()">📁 Fotoğraflar (ZIP)</button>
+      </div>
+      <div class="muted" style="margin-top:8px;font-size:11px">
+        "Belgeleri Oku": taranan fişlerden belge no, firma ve KDV bilgilerini çıkarır.
+        Excel'den önce bir kez çalıştırın.</div>
     </div>
     <div id="muhBox"></div>
   </section>
@@ -3636,8 +3643,12 @@ function renderBelgeler(box){
     +list.map(n=>{
         const kalem=(n.items||[]).filter(i=>i.known).map(i=>i.known).join(', ')||'Belge';
         const tutar=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
-        return '<div style="cursor:pointer" onclick="belgeAc('+n.id+')">'
+        const okundu=n.evrak&&n.evrak.okunanMetin;
+        return '<div style="cursor:pointer;position:relative" onclick="belgeAc('+n.id+')">'
           +'<img src="'+n.belge+'" loading="lazy" style="width:100%;height:104px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:#fff">'
+          +'<div style="position:absolute;top:5px;right:5px;font-size:10px;padding:2px 6px;border-radius:20px;'
+            +'background:'+(okundu?'rgba(47,125,79,.9)':'rgba(169,118,30,.9)')+';color:#fff">'
+            +(okundu?'okundu':'okunmadı')+'</div>'
           +'<div style="font-size:11px;font-weight:500;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(kalem)+'</div>'
           +'<div class="muted" style="font-size:10px">'+fmt(n.createdAt).split(' ')[0]+' · '+money(tutar)+'</div></div>';
       }).join('')
@@ -3647,16 +3658,33 @@ function belgeAc(id){
   const n=NOTES.find(x=>x.id===id); if(!n||!n.belge)return;
   const kalem=(n.items||[]).filter(i=>i.known).map(i=>i.known).join(', ')||'Belge';
   const tutar=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
+  const e=n.evrak||{};
+  const alan=(etiket,anahtar,deger)=>
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)">'
+    +'<span class="muted" style="font-size:12px">'+etiket+'</span>'
+    +'<span onclick="evrakAlanDuzenle('+n.id+',\''+anahtar+'\',\''+etiket+'\')" '
+      +'style="cursor:pointer;font-weight:500;text-align:right">'
+      +(deger!=null&&deger!==''?escapeHtml(String(deger)):'<span class="muted">— ekle —</span>')+' ✎</span></div>';
   const box=document.getElementById('confirmBox');
   box.style.display='block';
   box.innerHTML='<div class="card" style="text-align:left">'
     +'<div style="font-weight:600">'+escapeHtml(kalem)+'</div>'
     +'<div class="muted" style="font-size:12px;margin-bottom:10px">'+fmt(n.createdAt)+' · '+money(tutar)
       +(n.odeme?' · '+escapeHtml(n.odeme):'')+(n.mudur?' · '+escapeHtml(n.mudur):'')+'</div>'
-    +'<img src="'+n.belge+'" style="width:100%;border-radius:12px;border:1px solid var(--line)">'
+    +'<div style="font-weight:600;font-size:13px;margin-bottom:2px">Muhasebe Bilgileri</div>'
+    +alan('Belge No','belgeNo',e.belgeNo)
+    +alan('Firma','firma',e.firma)
+    +alan('VKN/TCKN','vkn',e.vkn)
+    +alan('Matrah','matrah',e.matrah!=null?money(e.matrah):'')
+    +alan('KDV Oranı','kdvOran',e.kdvOran!=null?e.kdvOran+'%':'')
+    +alan('KDV','kdv',e.kdv!=null?money(e.kdv):'')
+    +alan('Toplam','toplam',e.toplam!=null?money(e.toplam):'')
     +'<div class="row" style="margin-top:12px">'
-      +'<button class="btn sm ghost" onclick="document.getElementById(\'confirmBox\').style.display=\'none\'">Kapat</button>'
-      +'<button class="btn sm ghost" onclick="belgeEkleKayda('+n.id+')">🔄 Değiştir</button></div></div>';
+      +'<button class="btn sm" onclick="belgeBilgiAyikla('+n.id+')">🔍 Belgeyi Oku</button>'
+      +'<button class="btn sm ghost" onclick="belgeEkleKayda('+n.id+')">🔄 Fotoğrafı Değiştir</button></div>'
+    +'<img src="'+n.belge+'" style="width:100%;border-radius:12px;border:1px solid var(--line);margin-top:12px">'
+    +'<button class="btn sm ghost" style="margin-top:12px" onclick="document.getElementById(\'confirmBox\').style.display=\'none\'">Kapat</button>'
+    +'</div>';
 }
 /* 1) EVRAK - eksik belge uyarısı + belgeli arşiv */
 function renderEvrak(box){
@@ -3730,6 +3758,130 @@ function renderCari(box){
   box.innerHTML=html;
 }
 /* MUHASEBECİ PAKETİ - kapsamlı Excel */
+/* ---------- BELGEDEN MUHASEBE BİLGİSİ AYIKLAMA ----------
+   Muhasebeciye fotoğraf değil, ayıklanmış bilgi tablosu gider.
+   Fatura/fiş metninden belge no, firma, VKN, KDV ve tutarları çıkarır. */
+function evrakAyikla(metin){
+  if(!metin)return {};
+  const satirlar=metin.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  /* Türkçe büyük İ, /i bayrağıyla i'ye eşleşmez ("FİŞ NO" kaçıyordu);
+     eşleştirmeyi trLower ile normalleştirilmiş kopya üzerinde yapıyoruz. */
+  const norm=satirlar.map(s=>trLower(s));
+  const tam=trLower(metin.replace(/\s+/g,' '));
+  const sayi=s=>{const v=toNumber(String(s).replace(/[^\d.,]/g,''));return (v!==null&&v>0)?v:null;};
+  /* Bir satırdaki SON parasal değeri al — "KDV %20: 2.500,00" gibi
+     satırlarda oranı değil tutarı yakalamak için şart. */
+  const satirSonSayi=s=>{
+    const temiz=s.replace(/%\s*\d{1,2}/g,' ');          // oran ifadesini at
+    const hepsi=temiz.match(/\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+[.,]\d{1,2}|\d+/g);
+    if(!hepsi||!hepsi.length)return null;
+    return sayi(hepsi[hepsi.length-1]);
+  };
+  const satirBul=re=>{ const i=norm.findIndex(s=>re.test(s)); return i<0?null:satirlar[i]; };
+  const out={};
+  let m;
+
+  // Belge / fatura / fiş no
+  m=tam.match(/(?:fatura|belge|fi[sş]|irsaliye)\s*(?:no|nu|numaras[ıi])?\s*[:.\-]?\s*([a-z0-9\-\/]{4,20})/);
+  if(m)out.belgeNo=m[1].toUpperCase();
+  if(!out.belgeNo){ m=metin.match(/\b([A-Z]{3}\d{10,16})\b/); if(m)out.belgeNo=m[1]; }
+
+  // Vergi kimlik / TC no
+  m=tam.match(/(?:vkn|v\.?k\.?n|vergi\s*(?:kimlik\s*)?(?:no|numarasi)|tckn)\s*[:.\-]?\s*(\d{10,11})/);
+  if(m)out.vkn=m[1];
+  else{ m=metin.match(/\b(\d{10,11})\b/); if(m)out.vkn=m[1]; }
+
+  // Firma adı: harf ağırlıklı ilk anlamlı satır
+  const atla=/^(fatura|fi[sş]|irsaliye|tarih|saat|no|belge|say[ıi]n|adres|tel|vkn|vergi|toplam|kdv|matrah|nakit|kredi|kart|ara)/;
+  for(let i=0;i<Math.min(8,satirlar.length);i++){
+    const harf=(satirlar[i].match(/[A-Za-zÇĞİÖŞÜçğıöşü]/g)||[]).length;
+    if(harf>=4&&!atla.test(norm[i])&&!/^\d/.test(satirlar[i])){ out.firma=satirlar[i].slice(0,60); break; }
+  }
+
+  // Tarih
+  m=metin.match(/(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{2,4})/);
+  if(m){ const y=m[3].length===2?'20'+m[3]:m[3];
+         out.tarih=y+'-'+pad(parseInt(m[2],10))+'-'+pad(parseInt(m[1],10)); }
+
+  // KDV oranı
+  m=tam.match(/kdv\s*[%‰]?\s*(\d{1,2})\s*%?/);
+  if(m)out.kdvOran=parseInt(m[1],10);
+  // KDV tutarı: kdv geçen satırdaki son sayı (oran hariç tutulur)
+  const kdvSatir=satirBul(/kdv/);
+  if(kdvSatir){ const v=satirSonSayi(kdvSatir); if(v)out.kdv=v; }
+
+  // Matrah / ara toplam
+  const matSatir=satirBul(/matrah|ara\s*toplam|mal\s*\/?\s*hizmet/);
+  if(matSatir){ const v=satirSonSayi(matSatir); if(v)out.matrah=v; }
+
+  // Toplam: önce "genel toplam / ödenecek", yoksa düz "toplam" satırı
+  let acikToplam=false;
+  let topSatir=satirBul(/genel\s*toplam|odenecek|toplam\s*tutar/);
+  if(!topSatir)topSatir=satirBul(/(^|\s)toplam/);
+  if(topSatir&&!/matrah|ara\s*toplam/.test(trLower(topSatir))){
+    const v=satirSonSayi(topSatir); if(v){out.toplam=v; acikToplam=true;}
+  }
+  if(!out.toplam){
+    /* Son çare: en büyük parasal değer. Belge/fiş numarası ve vergi no
+       gibi tutar olmayan sayılar bu aramaya girmemeli. */
+    let mx=0;
+    satirlar.forEach((l,i)=>{
+      if(/no\b|vkn|vergi|tckn|tel|saat/.test(norm[i]))return;
+      const v=satirSonSayi(l);
+      if(v&&v>mx&&String(v).length<=9)mx=v;
+    });
+    if(mx)out.toplam=mx;
+  }
+  /* Tutarlılık: matrah ve KDV biliniyorsa toplam bunlardan gelir.
+     Açıkça "genel toplam" yazan bir satır varsa ona dokunmayız. */
+  if(out.matrah&&out.kdv&&!acikToplam){
+    out.toplam=Math.round((out.matrah+out.kdv)*100)/100;
+  }
+  return out;
+}
+/* Bir kaydın belgesini okuyup bilgileri kaydın üzerine işler */
+async function belgeBilgiAyikla(noteId,sessiz){
+  const n=NOTES.find(x=>x.id===noteId);
+  if(!n||!n.belge)return null;
+  try{
+    const worker=await Tesseract.createWorker('tur');
+    const {data:{text}}=await worker.recognize(n.belge);
+    await worker.terminate();
+    const e=evrakAyikla(text);
+    e.okunanMetin=(text||'').trim().slice(0,2000);
+    n.evrak=Object.assign({},n.evrak||{},e);
+    await Store.set('notes',NOTES);
+    await syncNote(noteId);
+    if(!sessiz){ renderMuhasebe(); }
+    return e;
+  }catch(err){ if(!sessiz)alert('Belge okunamadı (internet gerekir).'); return null; }
+}
+/* Belgesi olup henüz okunmamış kayıtların hepsini sırayla ayıklar */
+async function tumBelgeleriAyikla(){
+  const list=belgeliKayitlar().filter(n=>!n.evrak||!n.evrak.okunanMetin);
+  if(!list.length){alert('Okunmamış belge yok.');return;}
+  const box=document.getElementById('muhBox');
+  for(let i=0;i<list.length;i++){
+    box.innerHTML='<div class="card" style="text-align:center">Belgeler okunuyor…<br><b>'+(i+1)+'/'+list.length+'</b>'
+      +'<div class="muted" style="margin-top:6px">Bu işlem belge başına birkaç saniye sürer.</div></div>';
+    await belgeBilgiAyikla(list[i].id,true);
+  }
+  renderMuhasebe();
+  alert('✓ '+list.length+' belge okundu. Bilgileri kontrol edip düzeltebilirsiniz.');
+}
+async function evrakAlanDuzenle(noteId,alan,etiket){
+  const n=NOTES.find(x=>x.id===noteId); if(!n)return;
+  n.evrak=n.evrak||{};
+  const v=prompt(etiket+':',n.evrak[alan]||'');
+  if(v===null)return;
+  const t=v.trim();
+  n.evrak[alan]=(alan==='kdvOran')?(parseInt(t,10)||null)
+              :(['kdv','matrah','toplam'].includes(alan)?toNumber(t):t);
+  await Store.set('notes',NOTES);
+  await syncNote(noteId);
+  renderMuhasebe();
+}
+
 /* ---------- ZIP OLUŞTURUCU (kütüphanesiz, sıkıştırmasız) ----------
    Fotoğraflar zaten JPEG olduğu için sıkıştırma kazancı yok; "store"
    yöntemi hem hızlı hem de harici kütüphane gerektirmiyor (çevrimdışı çalışır). */
@@ -3816,6 +3968,68 @@ async function belgeKlasoruIndir(){
   btnKutu.innerHTML=eski;
   renderMuhasebe();
   alert('✓ '+list.length+' evrak paketlendi.\n\nZIP dosyasını WhatsApp veya e-posta ile muhasebeciye gönderebilirsiniz.');
+}
+
+/* ---------- MUHASEBECİ EXCEL TABLOSU ----------
+   Fotoğraf gönderilmez; belgeden ayıklanan bilgiler tek tabloya yazılır.
+   Belge okunmamışsa kaydın kendi verisi (tutar, KDV oranı) kullanılır. */
+function muhasebeExcel(){
+  const list=benimKayitlarim().filter(n=>(n.items||[]).some(i=>i.known));
+  if(!list.length){alert('Aktarılacak kayıt yok.');return;}
+  const satirlar=[];
+  list.forEach(n=>{
+    const e=n.evrak||{};
+    const brutKayit=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
+    const brut=e.toplam||brutKayit;
+    const oran=(e.kdvOran!=null?e.kdvOran:(n.kdvOran==null?20:n.kdvOran));
+    const h=kdvAyir(brut,oran);
+    const matrah=(e.matrah!=null?e.matrah:h.matrah);
+    const kdv=(e.kdv!=null?e.kdv:h.kdv);
+    satirlar.push({
+      'Tarih':(e.tarih?fmtDate(e.tarih):fmt(n.createdAt).split(' ')[0]),
+      'Belge No':e.belgeNo||'',
+      'Firma':e.firma||'',
+      'VKN/TCKN':e.vkn||'',
+      'Şantiye':(SITES.find(s=>s.id===n.siteId)||{}).ad||(n.fabrika?'Fabrika':''),
+      'Kalem':(n.items||[]).filter(i=>i.known).map(i=>i.known).join(', '),
+      'Matrah':matrah,
+      'KDV Oranı':oran/100,
+      'KDV':kdv,
+      'Brüt Toplam':brut,
+      'Ödeme':n.odeme||'',
+      'Kaydeden':n.mudur||'',
+      'Belge':n.belge?(e.okunanMetin?'okundu':'var, okunmadı'):'YOK'
+    });
+  });
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(satirlar);
+  ws['!cols']=[{wch:11},{wch:18},{wch:26},{wch:13},{wch:15},{wch:24},
+               {wch:13},{wch:10},{wch:12},{wch:13},{wch:15},{wch:11},{wch:14}];
+  // para ve yüzde biçimleri
+  const R=satirlar.length;
+  for(let i=2;i<=R+1;i++){
+    ['G','I','J'].forEach(c=>{ if(ws[c+i])ws[c+i].z='#,##0.00'; });
+    if(ws['H'+i])ws['H'+i].z='0%';
+  }
+  XLSX.utils.book_append_sheet(wb,ws,'Evrak Dökümü');
+
+  // KDV oranına göre özet — beyanname için
+  const kg={};
+  satirlar.forEach(s=>{
+    const o=Math.round(s['KDV Oranı']*100);
+    if(!kg[o])kg[o]={'KDV Oranı':o+'%','Belge Adedi':0,'Matrah':0,'KDV':0,'Brüt Toplam':0};
+    kg[o]['Belge Adedi']++; kg[o]['Matrah']+=s.Matrah; kg[o]['KDV']+=s.KDV; kg[o]['Brüt Toplam']+=s['Brüt Toplam'];
+  });
+  const ozet=Object.values(kg);
+  ozet.push({'KDV Oranı':'TOPLAM','Belge Adedi':satirlar.length,
+    'Matrah':ozet.reduce((a,b)=>a+b.Matrah,0),'KDV':ozet.reduce((a,b)=>a+b.KDV,0),
+    'Brüt Toplam':ozet.reduce((a,b)=>a+b['Brüt Toplam'],0)});
+  const ws2=XLSX.utils.json_to_sheet(ozet);
+  ws2['!cols']=[{wch:12},{wch:13},{wch:15},{wch:15},{wch:15}];
+  XLSX.utils.book_append_sheet(wb,ws2,'KDV Özeti');
+
+  const kim=(CURRENT&&CURRENT.rol!=='patron')?('_'+CURRENT.ad):'';
+  writeWorkbook(wb,'Muhasebe'+kim+'_'+todayStr()+'.xlsx');
 }
 
 function muhasebeciPaketi(){
@@ -3925,7 +4139,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · evrak arşivi';
+const SURUM='2026-07-28 · muhasebe tablosu';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
