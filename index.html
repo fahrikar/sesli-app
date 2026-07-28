@@ -302,7 +302,15 @@
     <h2>Kamera / Görsel Okuma</h2>
     <div class="card">
       <video id="cam" autoplay playsinline muted></video>
-      <canvas id="scanPreview" style="display:none;margin-top:10px"></canvas>
+      <!-- tarama önizlemesi + köşe tutamakları -->
+      <div id="scanWrap" style="display:none;position:relative;margin-top:10px;touch-action:none">
+        <canvas id="scanPreview" style="display:block"></canvas>
+        <div id="koseKatman" style="position:absolute;inset:0;display:none">
+          <svg id="koseCizgi" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none">
+            <polygon points="" fill="rgba(201,167,101,.15)" stroke="#b0863f" stroke-width="2"/>
+          </svg>
+        </div>
+      </div>
       <div class="row" style="margin-top:12px">
         <button class="btn sm" onclick="startCam()">Kamerayı Aç</button>
         <button class="btn sm green" onclick="captureDoc()">Belgeyi Tara</button>
@@ -310,15 +318,30 @@
           <input type="file" accept="image/*" style="display:none" onchange="fileScan(event)">
         </label>
       </div>
+      <div id="koseRow" class="row" style="margin-top:10px;display:none">
+        <button class="btn sm green" onclick="koseUygula()">✓ Düzelt ve Kırp</button>
+        <button class="btn sm ghost" onclick="koseIptal()">Tüm Sayfa</button>
+      </div>
       <div id="filterRow" class="row" style="margin-top:10px;display:none">
-        <button class="btn sm ghost" onclick="setFilter('bw')">Siyah-Beyaz</button>
-        <button class="btn sm ghost" onclick="setFilter('gray')">Gri</button>
-        <button class="btn sm ghost" onclick="setFilter('orj')">Orijinal</button>
+        <button class="btn sm" id="fBw" onclick="setFilter('bw')">Belge</button>
+        <button class="btn sm ghost" id="fGray" onclick="setFilter('gray')">Gri</button>
+        <button class="btn sm ghost" id="fOrj" onclick="setFilter('orj')">Renkli</button>
+        <button class="btn sm ghost" onclick="koseModuAc()">⁘ Köşeleri Ayarla</button>
+      </div>
+      <div id="okuRow" class="row" style="margin-top:10px;display:none">
         <button class="btn sm" onclick="runDocOCR()">Metni Oku</button>
-        <button class="btn sm ghost" onclick="downloadScan()">PDF Kaydet</button>
       </div>
       <div class="status" id="camStatus"></div>
       <canvas id="canvas" style="display:none"></canvas>
+    </div>
+    <div class="card" id="disaAktarKart" style="display:none">
+      <div style="font-weight:600;margin-bottom:4px">Belgeyi Dışa Aktar</div>
+      <div class="muted" style="margin-bottom:10px">Taranan görüntü ve okunan metin birlikte aktarılır.</div>
+      <div class="row">
+        <button class="btn sm ghost" onclick="belgeAktar('pdf')">PDF</button>
+        <button class="btn sm ghost" onclick="belgeAktar('word')">Word</button>
+        <button class="btn sm ghost" onclick="belgeAktar('excel')">Excel</button>
+      </div>
     </div>
     <div class="card">
       <label>Okunan metin (düzeltebilirsin)</label>
@@ -1732,8 +1755,16 @@ let stream=null;
 async function startCam(){
   const st=document.getElementById('camStatus');
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    document.getElementById('cam').srcObject=stream; st.textContent='';
+    // Belge taramada çözünürlük her şeydir: varsayılan 640x480 metni okunamaz
+    // hale getiriyordu. Arka kamerayı olabildiğince yüksek çözünürlükte istiyoruz.
+    stream=await navigator.mediaDevices.getUserMedia({video:{
+      facingMode:{ideal:'environment'},
+      width:{ideal:3840}, height:{ideal:2160},
+      focusMode:'continuous'
+    }});
+    document.getElementById('cam').srcObject=stream;
+    const t=stream.getVideoTracks()[0], s=t.getSettings?t.getSettings():{};
+    st.textContent=s.width?('Kamera hazır · '+s.width+'×'+s.height+' — belgeyi çerçeveye sığdırıp "Belgeyi Tara"ya basın'):'';
   }catch(e){ st.textContent='⚠️ Kameraya erişilemedi: '+e.message+' — izin ver ya da galeriden yükle.'; }
 }
 async function captureOCR(){
@@ -2204,32 +2235,165 @@ function unknownItems(notes){
 /* ---------- BELGE TARAMA (hafif görüntü işleme) ---------- */
 let scanSrc=null;      // orijinal ImageData
 let scanFilter='bw';
+let scanOrj=null;      // kırpılmamış ham görüntü (köşe ayarı için geri dönülür)
+const TARA_MAXW=2200;  // OCR için ~300dpi karşılığı; 1400 fazla düşüktü
+
 function grabToCanvas(srcCanvasOrImg,w,h){
   const c=document.getElementById('scanPreview');
   c.width=w; c.height=h;
   const ctx=c.getContext('2d');
+  ctx.imageSmoothingQuality='high';
   ctx.drawImage(srcCanvasOrImg,0,0,w,h);
   scanSrc=ctx.getImageData(0,0,w,h);
-  c.style.display='block';
+  scanOrj=scanSrc;
+  document.getElementById('scanWrap').style.display='block';
   document.getElementById('filterRow').style.display='flex';
+  document.getElementById('okuRow').style.display='flex';
+  document.getElementById('disaAktarKart').style.display='block';
+  koseModuAc();          // iPhone Notlar gibi: önce köşeleri onayla
   applyFilter();
 }
-function captureDoc(){
+async function captureDoc(){
   const v=document.getElementById('cam');
   if(!v.videoWidth){document.getElementById('camStatus').textContent='Önce kamerayı aç.';return;}
-  const maxW=1400, sc=Math.min(1,maxW/v.videoWidth);
-  grabToCanvas(v, Math.round(v.videoWidth*sc), Math.round(v.videoHeight*sc));
-  document.getElementById('camStatus').textContent='Belge tarandı. Filtre seç, sonra "Metni Oku".';
+  const st=document.getElementById('camStatus');
+  st.textContent='Yakalanıyor…';
+  let kaynak=v, kw=v.videoWidth, kh=v.videoHeight;
+  // Mümkünse tam çözünürlüklü fotoğraf çek (video karesinden keskindir)
+  try{
+    const track=stream&&stream.getVideoTracks()[0];
+    if(track&&window.ImageCapture){
+      const ic=new ImageCapture(track);
+      const blob=await ic.takePhoto();
+      const bmp=await createImageBitmap(blob);
+      kaynak=bmp; kw=bmp.width; kh=bmp.height;
+    }
+  }catch(e){ /* desteklenmiyorsa video karesi kullanılır */ }
+  const sc=Math.min(1,TARA_MAXW/kw);
+  grabToCanvas(kaynak, Math.round(kw*sc), Math.round(kh*sc));
+  st.textContent='Köşeleri belgenin kenarlarına getirip "Düzelt ve Kırp"a basın.';
 }
 function fileScan(ev){
   const f=ev.target.files&&ev.target.files[0]; if(!f)return;
   const img=new Image();
-  img.onload=()=>{const maxW=1400,sc=Math.min(1,maxW/img.width);
+  img.onload=()=>{const sc=Math.min(1,TARA_MAXW/img.width);
     grabToCanvas(img,Math.round(img.width*sc),Math.round(img.height*sc));
-    document.getElementById('camStatus').textContent='Görsel yüklendi. Filtre seç, sonra "Metni Oku".';};
+    document.getElementById('camStatus').textContent='Köşeleri ayarlayıp "Düzelt ve Kırp"a basın.';};
   img.src=URL.createObjectURL(f);
 }
-function setFilter(f){scanFilter=f;applyFilter();}
+
+/* ---------- KÖŞE DÜZELTME (perspektif) ---------- */
+let koseler=null;        // [[x,y] x4] — görüntü koordinatında
+function koseModuAc(){
+  if(!scanOrj)return;
+  scanSrc=scanOrj;                       // ham görüntüye dön
+  const w=scanSrc.width,h=scanSrc.height;
+  const mx=w*0.06,my=h*0.06;
+  koseler=[[mx,my],[w-mx,my],[w-mx,h-my],[mx,h-my]];
+  document.getElementById('koseKatman').style.display='block';
+  document.getElementById('koseRow').style.display='flex';
+  applyFilter();
+  koseleriCiz();
+}
+function koseIptal(){                     // kırpma yapmadan tüm sayfayı kullan
+  document.getElementById('koseKatman').style.display='none';
+  document.getElementById('koseRow').style.display='none';
+  scanSrc=scanOrj; applyFilter();
+  document.getElementById('camStatus').textContent='Tüm sayfa kullanılıyor.';
+}
+function koseleriCiz(){
+  const c=document.getElementById('scanPreview'), kat=document.getElementById('koseKatman');
+  const olcek=c.clientWidth/c.width;
+  kat.querySelectorAll('.kose').forEach(e=>e.remove());
+  const poly=kat.querySelector('polygon');
+  poly.setAttribute('points',koseler.map(p=>(p[0]*olcek)+','+(p[1]*olcek)).join(' '));
+  koseler.forEach((p,i)=>{
+    const d=document.createElement('div');
+    d.className='kose';
+    d.style.cssText='position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;'
+      +'background:rgba(255,253,248,.9);border:2px solid #b0863f;box-shadow:0 2px 8px rgba(0,0,0,.25);'
+      +'touch-action:none;cursor:grab;left:'+(p[0]*olcek)+'px;top:'+(p[1]*olcek)+'px';
+    d.addEventListener('pointerdown',ev=>{
+      ev.preventDefault(); ev.stopPropagation();
+      d.setPointerCapture(ev.pointerId);
+      const tasi=e2=>{
+        const r=c.getBoundingClientRect();
+        const x=Math.max(0,Math.min(c.width,(e2.clientX-r.left)/olcek));
+        const y=Math.max(0,Math.min(c.height,(e2.clientY-r.top)/olcek));
+        koseler[i]=[x,y]; koseleriCiz();
+      };
+      const birak=()=>{ d.removeEventListener('pointermove',tasi); d.removeEventListener('pointerup',birak); };
+      d.addEventListener('pointermove',tasi); d.addEventListener('pointerup',birak);
+    });
+    kat.appendChild(d);
+  });
+}
+/* 8 bilinmeyenli homografi çözümü (Gauss eliminasyonu) */
+function homografi(src,dst){
+  const A=[],b=[];
+  for(let i=0;i<4;i++){
+    const x=src[i][0],y=src[i][1],u=dst[i][0],v=dst[i][1];
+    A.push([x,y,1,0,0,0,-u*x,-u*y]); b.push(u);
+    A.push([0,0,0,x,y,1,-v*x,-v*y]); b.push(v);
+  }
+  const n=8;
+  for(let i=0;i<n;i++){
+    let p=i; for(let r=i+1;r<n;r++)if(Math.abs(A[r][i])>Math.abs(A[p][i]))p=r;
+    [A[i],A[p]]=[A[p],A[i]]; [b[i],b[p]]=[b[p],b[i]];
+    if(Math.abs(A[i][i])<1e-10)return null;
+    for(let r=i+1;r<n;r++){
+      const f=A[r][i]/A[i][i];
+      for(let cc=i;cc<n;cc++)A[r][cc]-=f*A[i][cc];
+      b[r]-=f*b[i];
+    }
+  }
+  const h=new Array(n).fill(0);
+  for(let i=n-1;i>=0;i--){
+    let s=b[i]; for(let cc=i+1;cc<n;cc++)s-=A[i][cc]*h[cc];
+    h[i]=s/A[i][i];
+  }
+  return h;
+}
+function koseUygula(){
+  if(!scanOrj||!koseler)return;
+  const [p0,p1,p2,p3]=koseler;
+  const uzunluk=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+  const W=Math.round(Math.max(uzunluk(p0,p1),uzunluk(p3,p2)));
+  const H=Math.round(Math.max(uzunluk(p0,p3),uzunluk(p1,p2)));
+  if(W<40||H<40){document.getElementById('camStatus').textContent='Seçilen alan çok küçük.';return;}
+  const hedef=[[0,0],[W,0],[W,H],[0,H]];
+  const h=homografi(hedef,koseler);          // hedef -> kaynak (ters eşleme)
+  if(!h){document.getElementById('camStatus').textContent='Köşeler düzeltilemedi, tekrar deneyin.';return;}
+  const src=scanOrj, sw=src.width, sd=src.data;
+  const out=new ImageData(W,H), od=out.data;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const d=h[6]*x+h[7]*y+1;
+    const sx=(h[0]*x+h[1]*y+h[2])/d, sy=(h[3]*x+h[4]*y+h[5])/d;
+    const x0=Math.floor(sx), y0=Math.floor(sy);
+    const i=(y*W+x)*4;
+    if(x0<0||y0<0||x0>=src.width-1||y0>=src.height-1){ od[i]=od[i+1]=od[i+2]=255; od[i+3]=255; continue; }
+    const fx=sx-x0, fy=sy-y0;
+    for(let k=0;k<3;k++){                    // çift doğrusal örnekleme
+      const a=sd[(y0*sw+x0)*4+k], b2=sd[(y0*sw+x0+1)*4+k];
+      const c2=sd[((y0+1)*sw+x0)*4+k], d2=sd[((y0+1)*sw+x0+1)*4+k];
+      od[i+k]=(a*(1-fx)+b2*fx)*(1-fy)+(c2*(1-fx)+d2*fx)*fy;
+    }
+    od[i+3]=255;
+  }
+  const c=document.getElementById('scanPreview');
+  c.width=W; c.height=H;
+  scanSrc=out;
+  document.getElementById('koseKatman').style.display='none';
+  document.getElementById('koseRow').style.display='none';
+  applyFilter();
+  document.getElementById('camStatus').textContent='✓ Düzeltildi. Şimdi "Metni Oku" ya da dışa aktarın.';
+}
+function setFilter(f){
+  scanFilter=f; applyFilter();
+  [['bw','fBw'],['gray','fGray'],['orj','fOrj']].forEach(([k,id])=>{
+    const b=document.getElementById(id); if(b)b.className='btn sm'+(k===f?'':' ghost');
+  });
+}
 function applyFilter(){
   if(!scanSrc)return;
   const c=document.getElementById('scanPreview');
@@ -2255,19 +2419,46 @@ function applyFilter(){
       const v=Math.max(0,Math.min(255,(gray[j]-mn)/rng*255));
       d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
     }
-  }else{ // bw - adaptif eşik (yerel ortalama)
+  }else{
+    /* BELGE modu — tarayıcı görünümü:
+       1) Geniş pencereli yerel ortalama ile ışık/gölge dengesizliği giderilir
+          (kağıdın her yeri eşit beyaz olur).
+       2) Sauvola benzeri, yerel standart sapmaya duyarlı eşik uygulanır;
+          boş alanlarda leke, yazıda kopma olmaz.
+       Eskiden tek geçişli sabit oranlı eşik vardı: gölgeli köşeler siyah
+       blok, soluk yazılar ise kayıp çıkıyordu. */
     const w=scanSrc.width,h=scanSrc.height;
-    const R=Math.max(8,Math.round(Math.min(w,h)/24));
-    // integral image
-    const ii=new Float64Array((w+1)*(h+1));
-    for(let y=1;y<=h;y++){let row=0;for(let x=1;x<=w;x++){row+=gray[(y-1)*w+(x-1)];ii[y*(w+1)+x]=ii[(y-1)*(w+1)+x]+row;}}
+    const ii=new Float64Array((w+1)*(h+1));    // toplam
+    const ii2=new Float64Array((w+1)*(h+1));   // kare toplam
+    for(let y=1;y<=h;y++){
+      let r1=0,r2=0;
+      for(let x=1;x<=w;x++){
+        const g=gray[(y-1)*w+(x-1)];
+        r1+=g; r2+=g*g;
+        ii[y*(w+1)+x]=ii[(y-1)*(w+1)+x]+r1;
+        ii2[y*(w+1)+x]=ii2[(y-1)*(w+1)+x]+r2;
+      }
+    }
+    const kutu=(A,x0,y0,x1,y1)=>A[(y1+1)*(w+1)+(x1+1)]-A[y0*(w+1)+(x1+1)]-A[(y1+1)*(w+1)+x0]+A[y0*(w+1)+x0];
+    const Rb=Math.max(16,Math.round(Math.min(w,h)/8));    // ışık dengeleme penceresi (geniş)
+    const Rt=Math.max(6,Math.round(Math.min(w,h)/60));    // eşik penceresi (dar)
+    const k=0.28;                                          // Sauvola duyarlılığı
     for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-      const x0=Math.max(0,x-R),y0=Math.max(0,y-R),x1=Math.min(w-1,x+R),y1=Math.min(h-1,y+R);
-      const cnt=(x1-x0+1)*(y1-y0+1);
-      const s=ii[(y1+1)*(w+1)+(x1+1)]-ii[(y0)*(w+1)+(x1+1)]-ii[(y1+1)*(w+1)+(x0)]+ii[(y0)*(w+1)+(x0)];
-      const mean=s/cnt;
+      // 1) arka plan tahmini ile ışık dengeleme
+      let x0=Math.max(0,x-Rb),y0=Math.max(0,y-Rb),x1=Math.min(w-1,x+Rb),y1=Math.min(h-1,y+Rb);
+      let n=(x1-x0+1)*(y1-y0+1);
+      const arka=kutu(ii,x0,y0,x1,y1)/n;
+      const duz=Math.min(255,gray[y*w+x]*(200/Math.max(1,arka)));
+      // 2) yerel ortalama + sapma ile eşik
+      x0=Math.max(0,x-Rt);y0=Math.max(0,y-Rt);x1=Math.min(w-1,x+Rt);y1=Math.min(h-1,y+Rt);
+      n=(x1-x0+1)*(y1-y0+1);
+      const m=kutu(ii,x0,y0,x1,y1)/n;
+      const varyans=Math.max(0,kutu(ii2,x0,y0,x1,y1)/n-m*m);
+      const sapma=Math.sqrt(varyans);
+      const mDuz=Math.min(255,m*(200/Math.max(1,arka)));
+      const esik=mDuz*(1-k*(1-sapma/128));
       const idx=(y*w+x)*4;
-      const v=gray[y*w+x]<mean*0.92?0:255;   // hafif eşik toleransı
+      const v=duz<esik?0:255;
       d[idx]=d[idx+1]=d[idx+2]=v; d[idx+3]=255;
     }
   }
@@ -2288,14 +2479,54 @@ async function runDocOCR(){
     suggestFromReceipt(clean);
   }catch(e){ st.textContent='OCR yüklenemedi (internet gerekir).'; }
 }
-function downloadScan(){
+/* ---------- TARANAN BELGEYİ DIŞA AKTAR (PDF / Word / Excel) ---------- */
+function belgeAktar(tip){
+  if(!scanSrc){alert('Önce belge tarayın.');return;}
   const c=document.getElementById('scanPreview');
-  if(!scanSrc){alert('Önce belge tara.');return;}
-  const img=c.toDataURL('image/jpeg',0.85);
-  const el=document.createElement('div');
-  el.innerHTML='<img src="'+img+'" style="width:100%">';
-  html2pdf().set({margin:6,filename:'Belge_'+todayStr()+'.pdf',image:{type:'jpeg',quality:.85},
-    html2canvas:{scale:2},jsPDF:{unit:'mm',format:'a4'}}).from(el).save();
+  const metin=(document.getElementById('ocrText').value||'').trim();
+  const ad='Belge_'+todayStr();
+
+  if(tip==='pdf'){
+    const img=c.toDataURL('image/jpeg',0.9);
+    const el=document.createElement('div');
+    el.innerHTML='<div style="font-family:sans-serif"><h3 style="margin:0 0 8px">Taranan Belge</h3>'
+      +'<div style="color:#666;font-size:12px;margin-bottom:8px">'+fmt(new Date().toISOString())+'</div>'
+      +'<img src="'+img+'" style="width:100%">'
+      +(metin?'<h4 style="margin:14px 0 6px">Okunan Metin</h4><div style="white-space:pre-wrap;font-size:12px">'+escapeHtml(metin)+'</div>':'')
+      +'</div>';
+    html2pdf().set({margin:8,filename:ad+'.pdf',image:{type:'jpeg',quality:.9},
+      html2canvas:{scale:2},jsPDF:{unit:'mm',format:'a4'}}).from(el).save();
+    return;
+  }
+
+  if(tip==='word'){
+    const img=c.toDataURL('image/png');
+    const html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">'
+      +'<head><meta charset="utf-8"></head><body style="font-family:Calibri,sans-serif">'
+      +'<h2>Taranan Belge</h2><p style="color:#666">'+fmt(new Date().toISOString())+'</p>'
+      +'<img src="'+img+'" style="width:100%">'
+      +(metin?'<h3>Okunan Metin</h3><p style="white-space:pre-wrap">'+escapeHtml(metin).replace(/\n/g,'<br>')+'</p>':'')
+      +'</body></html>';
+    dl(new Blob(['﻿'+html],{type:'application/msword'}),ad+'.doc');
+    return;
+  }
+
+  if(tip==='excel'){
+    if(!metin){alert('Excel için önce "Metni Oku" ile belgeyi okutun.');return;}
+    const wb=XLSX.utils.book_new();
+    // Satırları sütunlara ayır: 2+ boşluk ya da sekme sütun ayracı sayılır
+    const satirlar=metin.split(/\r?\n/).filter(s=>s.trim());
+    const veri=satirlar.map(s=>s.split(/\t|\s{2,}/).map(x=>{
+      const t=x.trim();
+      const n=toNumber(t.replace(/[₺\s]/g,''));
+      return (n!==null&&/^[\d.,]+$/.test(t.replace(/[₺\s]/g,'')))?n:t;   // sayıları sayı olarak yaz
+    }));
+    const ws=XLSX.utils.aoa_to_sheet([['Taranan Belge · '+fmt(new Date().toISOString())],[]].concat(veri));
+    ws['!cols']=[{wch:42},{wch:16},{wch:16},{wch:16}];
+    XLSX.utils.book_append_sheet(wb,ws,'Belge');
+    writeWorkbook(wb,ad+'.xlsx');
+    return;
+  }
 }
 
 /* ---------- FİŞTEN TUTAR + TARİH ÇIKARMA ---------- */
@@ -3270,7 +3501,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · Güner Muhasebe';
+const SURUM='2026-07-28 · belge tarayıcı';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
