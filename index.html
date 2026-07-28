@@ -1360,7 +1360,12 @@ const SES_HATALARI={
   'audio-capture':'⚠️ <b>Mikrofona ulaşılamadı.</b><br>Başka bir uygulama mikrofonu kullanıyor olabilir; onu kapatıp tekrar deneyin.',
   'language-not-supported':'⚠️ Türkçe ses tanıma bu cihazda yok. Chrome ve Google uygulamasını güncelleyin.'
 };
+let MIC_IZIN=false;      // bu cihazda izin alındı mı (ilk kullanımda sorulur)
+let izinMesajiVar=false; // "izin verildi, tekrar basın" mesajı ekranda mı
+let sesIstek=0;          // her basışa artan numara — eskisi geçersiz kalsın
+let basili=false;        // parmak hâlâ mikrofonda mı
 async function startVoice(){
+  const istek=++sesIstek;
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   sonHata='';
   const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
@@ -1369,16 +1374,29 @@ async function startVoice(){
       :'⚠️ <b>Bu tarayıcı ses tanımayı desteklemiyor.</b><br>Chrome ile açmayı deneyin.','hata'); return; }
   if(!window.isSecureContext){ sesDurum('⚠️ Mikrofon yalnızca güvenli bağlantıda (https) çalışır.','hata'); return; }
   if(navigator.onLine===false){ sesDurum(SES_HATALARI['network'],'hata'); return; }
-  try{
-    // izin kontrolü — akışı hemen bırakıyoruz, tanımayı SpeechRecognition kendi açacak
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-    stream.getTracks().forEach(t=>t.stop());
+
+  /* İlk kullanımda izin penceresi açılır ve getUserMedia BEKLER. Kullanıcı o
+     sırada parmağını kaldırırsa kayıt, parmak kalktıktan sonra başlardı ve
+     dışarıdan "mikrofon tepki vermiyor" gibi görünürdü. İzni bir kez alıp
+     saklıyoruz; izin sırasında bırakılırsa kayda başlamıyoruz. */
+  if(!MIC_IZIN){
+    sesDurum('🎤 Mikrofon izni isteniyor… ekrandaki <b>İzin ver</b>e dokunun.','uyari');
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      stream.getTracks().forEach(t=>t.stop());
+      MIC_IZIN=true;
+    }catch(e){
+      sonHata=(e.name==='NotAllowedError')?'not-allowed':'audio-capture';
+      sesDurum(SES_HATALARI[sonHata]||('⚠️ Mikrofon açılamadı ('+e.name+').'),'hata');
+      return;
+    }
+    if(istek!==sesIstek||!basili){
+      izinMesajiVar=true;   // autoSaveVoice bu mesajı ezmesin
+      sesDurum('✓ <b>Mikrofon izni verildi.</b><br>Şimdi mikrofonu <b>basılı tutup</b> konuşun.','uyari');
+      return;
+    }
   }
-  catch(e){
-    sesDurum(SES_HATALARI[e.name==='NotAllowedError'?'not-allowed':'audio-capture']
-      ||('⚠️ Mikrofon açılamadı ('+e.name+').'),'hata');
-    return;
-  }
+  if(istek!==sesIstek||!basili)return;   // bu arada bırakıldıysa başlatma
   recog=new SR(); recog.lang='tr-TR'; recog.continuous=true; recog.interimResults=true; recog.maxAlternatives=3;
   let base=document.getElementById('voiceText').value;
   recog.onresult=e=>{
@@ -1419,6 +1437,7 @@ async function startVoice(){
   }catch(e){ sesDurum('⚠️ Başlatılamadı: '+e.message,'hata'); }
 }
 function stopVoice(){
+  sesIstek++;                 // yolda olan başlatma varsa geçersiz kıl
   if(!listening)return;
   listening=false; try{recog&&recog.stop();}catch(e){}
   const st=document.getElementById('voiceStatus');
@@ -1433,13 +1452,14 @@ let holdTimer=null, held=false;
 function bindHold(el,opts={}){
   if(!el)return;
   const down=e=>{
-    e.preventDefault(); held=false;
+    e.preventDefault(); held=false; basili=true;
     holdTimer=setTimeout(()=>{ held=true; startVoice(); },140);
   };
   const up=e=>{
-    e.preventDefault(); clearTimeout(holdTimer);
+    e.preventDefault(); clearTimeout(holdTimer); basili=false;
     if(held){ stopVoice(); autoSaveVoice(); }
     else{ // kısa dokunuş: sessiz kalma, ne yapılacağını söyle
+      stopVoice();   // izin beklerken bırakıldıysa başlatmayı iptal et
       sesDurum('🎤 Mikrofonu <b>basılı tutun</b>, konuşun, bitince bırakın.','uyari');
       setTimeout(()=>{ if(!listening)sesDurum(''); },3500);
     }
@@ -1461,6 +1481,8 @@ async function autoSaveVoice(){
     const txt=document.getElementById('voiceText').value.trim();
     const lb=document.getElementById('liveBox');
     if(!txt){
+      // izin yeni verildiyse oradaki yönlendirmeyi ezme
+      if(izinMesajiVar){ izinMesajiVar=false; return; }
       // Sessizce vazgeçme: kullanıcı "hiçbir şey olmuyor" sanmasın
       if(sonHata){ sesDurum(SES_HATALARI[sonHata]||('⚠️ Ses tanıma hatası: '+sonHata),'hata'); }
       else{
@@ -3139,7 +3161,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · şantiye görünümü';
+const SURUM='2026-07-28 · mikrofon izni';
 
 /* Service worker: uygulama gibi kurulsun, internet yokken de açılsın ve
    GÜNCELLEMELER KENDİLİĞİNDEN İNSİN (silip yeniden kurmaya gerek kalmadan). */

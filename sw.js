@@ -2,7 +2,7 @@
    Strateji: ÖNCE AĞ, sonra önbellek.
    Böylece her açılışta güncel sürüm iner; internet yoksa son kopya açılır.
    (Cache-first kullanılmıyor: eski sürümün telefonda takılı kalmasını istemiyoruz.) */
-const SURUM='sesli-v8';
+const SURUM='sesli-v9';
 const KABUK=[
   './',
   './index.html',
