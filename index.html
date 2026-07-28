@@ -121,6 +121,10 @@
   nav svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   nav button.on{color:var(--ink)}
 
+  /* Mikrofon alanı: parmak kayınca tarayıcı bunu kaydırma sanıp basışı
+     iptal etmesin diye dokunma hareketleri tamamen bize ait. */
+  #micHero{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+
   /* onay katmanı: kartlar ortalanır, uzun içerik kaydırılır */
   #confirmBox>.card{max-width:520px;margin:0 auto 12px}
   #confirmBox{text-align:left}
@@ -1352,18 +1356,11 @@ function go(id){
    Mikrofon ana ekranda olduğu için, mesaj yalnızca gizli ekrana yazılırsa
    kullanıcı hiçbir şey olmuyor sanıyor. */
 let recog=null, listening=false, sonHata='';
-/* iPhone/iPad: Safari ve iOS'taki tüm tarayıcılar SpeechRecognition'ı
-   desteklemez. Bunun yerine iOS'un KLAVYE DİKTESİ kullanılır — ana ekrana
-   eklenmiş uygulamada da çalışır ve Türkçesi iyidir. */
+/* iPhone/iPad: Safari 14.5'ten beri webkitSpeechRecognition destekliyor,
+   yani mikrofonu basılı tutup konuşmak burada da çalışır. Farkı: Safari her
+   cümleden sonra tanımayı kapatır; parmak basılıyken onend ile sürdürülür. */
 const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||
           (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-function dikteAc(){
-  go('voice');
-  const ta=document.getElementById('voiceText');
-  const st=document.getElementById('voiceStatus');
-  if(st)st.innerHTML='⌨️ Klavyedeki <b>🎤</b> tuşuna basıp konuşun. Bitince <b>Kaydet</b>\'e dokunun.';
-  if(ta){ ta.value=''; ta.focus(); }   // dokunuş jesti içinde odaklan ki klavye açılsın
-}
 function sesDurum(mesaj,tur){
   const st=document.getElementById('voiceStatus');
   if(st)st.innerHTML=mesaj;
@@ -1384,44 +1381,22 @@ const SES_HATALARI={
   'audio-capture':'⚠️ <b>Mikrofona ulaşılamadı.</b><br>Başka bir uygulama mikrofonu kullanıyor olabilir; onu kapatıp tekrar deneyin.',
   'language-not-supported':'⚠️ Türkçe ses tanıma bu cihazda yok. Chrome ve Google uygulamasını güncelleyin.'
 };
-let MIC_IZIN=false;      // bu cihazda izin alındı mı (ilk kullanımda sorulur)
-let izinMesajiVar=false; // "izin verildi, tekrar basın" mesajı ekranda mı
-let sesIstek=0;          // her basışa artan numara — eskisi geçersiz kalsın
 let basili=false;        // parmak hâlâ mikrofonda mı
-async function startVoice(){
-  const istek=++sesIstek;
+/* ÖNEMLİ: Bu fonksiyon SENKRON çalışır — hiçbir await yoktur.
+   Safari (iPhone) mikrofonu yalnızca dokunma jestinin içinde açar; araya
+   await girerse jest zinciri kopar ve mikrofon hiç açılmaz. İzni de
+   SpeechRecognition'ın kendisi ister, ayrıca getUserMedia çağırmıyoruz. */
+function startVoice(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   sonHata='';
-  const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-  if(!SR){ sesDurum(isIOS
-      ?'⚠️ <b>iPhone/iPad canlı ses tanımayı desteklemiyor.</b><br>Android telefonda Chrome kullanın ya da <b>✎ Elle Ekle</b> ile girin.'
-      :'⚠️ <b>Bu tarayıcı ses tanımayı desteklemiyor.</b><br>Chrome ile açmayı deneyin.','hata'); return; }
+  if(!SR){ sesDurum('⚠️ <b>Bu tarayıcı ses tanımayı desteklemiyor.</b><br>'
+      +(IOS?'iPhone’da <b>Safari</b> ile açın (iOS 14.5 ve üzeri gerekir).':'Chrome ile açmayı deneyin.')
+      +'<br>Ya da <b>✎ Elle Ekle</b> ile girebilirsiniz.','hata'); return; }
   if(!window.isSecureContext){ sesDurum('⚠️ Mikrofon yalnızca güvenli bağlantıda (https) çalışır.','hata'); return; }
   if(navigator.onLine===false){ sesDurum(SES_HATALARI['network'],'hata'); return; }
-
-  /* İlk kullanımda izin penceresi açılır ve getUserMedia BEKLER. Kullanıcı o
-     sırada parmağını kaldırırsa kayıt, parmak kalktıktan sonra başlardı ve
-     dışarıdan "mikrofon tepki vermiyor" gibi görünürdü. İzni bir kez alıp
-     saklıyoruz; izin sırasında bırakılırsa kayda başlamıyoruz. */
-  if(!MIC_IZIN){
-    sesDurum('🎤 Mikrofon izni isteniyor… ekrandaki <b>İzin ver</b>e dokunun.','uyari');
-    try{
-      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-      stream.getTracks().forEach(t=>t.stop());
-      MIC_IZIN=true;
-    }catch(e){
-      sonHata=(e.name==='NotAllowedError')?'not-allowed':'audio-capture';
-      sesDurum(SES_HATALARI[sonHata]||('⚠️ Mikrofon açılamadı ('+e.name+').'),'hata');
-      return;
-    }
-    if(istek!==sesIstek||!basili){
-      izinMesajiVar=true;   // autoSaveVoice bu mesajı ezmesin
-      sesDurum('✓ <b>Mikrofon izni verildi.</b><br>Şimdi mikrofonu <b>basılı tutup</b> konuşun.','uyari');
-      return;
-    }
-  }
-  if(istek!==sesIstek||!basili)return;   // bu arada bırakıldıysa başlatma
-  recog=new SR(); recog.lang='tr-TR'; recog.continuous=true; recog.interimResults=true; recog.maxAlternatives=3;
+  recog=new SR(); recog.lang='tr-TR';
+  recog.continuous=!IOS;              // Safari'de continuous sorunlu; onend ile sürdürüyoruz
+  recog.interimResults=true; recog.maxAlternatives=3;
   let base=document.getElementById('voiceText').value;
   recog.onresult=e=>{
     let interim='',fin='';
@@ -1443,49 +1418,42 @@ async function startVoice(){
     if(fin)base+=fin;
     const full=(base+interim).trim();
     document.getElementById('voiceText').value=full;
-    sessizlikSayaciniSifirla();        // konuşma sürdükçe kapanmayı ertele
+    sessizlikSayaciniSifirla();        // konuşma sürdükçe emniyet kapanmasını ertele
     const lb=document.getElementById('liveBox');
     if(lb){lb.style.display='block';
-      lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:10px 12px;font-size:14px;text-align:left;max-height:120px;overflow:auto">'+escapeHtml(full||'…')+'</div>'
-      +'<div class="muted" style="font-size:11px;margin-top:6px;text-align:center">bitince mikrofona tekrar dokunun</div>';}
+      lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:10px 12px;font-size:14px;text-align:left;max-height:120px;overflow:auto">'+escapeHtml(full||'…')+'</div>';}
   };
   recog.onerror=ev=>{
     if(ev.error==='aborted')return;                 // biz durdurduk, hata değil
     sonHata=ev.error||'';
     sesDurum(SES_HATALARI[ev.error]||('⚠️ Ses tanıma hatası: '+ev.error),'hata');
   };
-  recog.onend=()=>{ if(listening){try{recog.start();}catch(e){}} };
+  // Parmak basılı durdukça dinlemeyi sürdür (Safari her cümlede kapatır)
+  recog.onend=()=>{ if(listening&&basili){try{recog.start();}catch(e){}} };
   try{ recog.start(); listening=true;
-    sesDurum('<span class="rec-dot"></span> <b>Dinleniyor…</b> konuşun, bitince mikrofona <b>tekrar dokunun</b>');
+    sesDurum('<span class="rec-dot"></span> <b>Dinleniyor…</b> konuşun, bitince parmağınızı kaldırın');
     document.getElementById('voiceCard').classList.add('live');
     document.getElementById('discWrap').classList.add('rec');
-    document.getElementById('micHint').textContent='Dinleniyor… bitince tekrar dokun';
+    document.getElementById('micHint').textContent='Dinleniyor… bırakınca duracak';
     sessizlikSayaciniSifirla();
   }catch(e){ sesDurum('⚠️ Başlatılamadı: '+e.message,'hata'); }
 }
 function stopVoice(){
-  sesIstek++;                 // yolda olan başlatma varsa geçersiz kıl
   if(!listening)return;
   listening=false; try{recog&&recog.stop();}catch(e){}
   const st=document.getElementById('voiceStatus');
   if(st&&!sonHata)st.textContent='Kayıt durdu.';
   document.getElementById('voiceCard').classList.remove('live');
   document.getElementById('discWrap').classList.remove('rec');
-  document.getElementById('micHint').textContent='Dokun ve konuş';
+  document.getElementById('micHint').textContent='Mikrofonu basılı tut ve konuş';
 }
 
-/* ---------- DOKUN-BAŞLAT / DOKUN-BİTİR ----------
-   Basılı tutma mobilde kırılgan: parmak birkaç piksel kayınca tarayıcı
-   hareketi iptal ediyor, uzun basış menü açabiliyor. Tek dokunuş çok daha
-   güvenilir. Konuşma bitince 3 sn sessizlikte kendiliğinden de kapanır. */
+/* ---------- BASILI TUT / KONUŞ / BIRAK ----------
+   Kritik ayrıntı: mikrofon alanına touch-action:none verilir. Aksi halde
+   parmak birkaç piksel kayınca tarayıcı bunu kaydırma sanıp pointercancel
+   gönderiyor ve kayıt daha başlarken düşüyordu.
+   Emniyet: parmak kalkmadan 15 sn sessizlik olursa kendiliğinden kapanır. */
 let sessizlikTimer=null, sureTimer=null;
-function sesToggle(){
-  if(listening||basili){ sesBitir(); return; }
-  basili=true;                       // dokunma modunda "bırakma" yok
-  startVoice();
-  clearTimeout(sureTimer);
-  sureTimer=setTimeout(()=>{ if(listening)sesBitir(); },60000);   // en fazla 1 dk
-}
 function sesBitir(){
   clearTimeout(sessizlikTimer); clearTimeout(sureTimer);
   basili=false;
@@ -1494,7 +1462,26 @@ function sesBitir(){
 }
 function sessizlikSayaciniSifirla(){
   clearTimeout(sessizlikTimer);
-  sessizlikTimer=setTimeout(()=>{ if(listening)sesBitir(); },3000);
+  sessizlikTimer=setTimeout(()=>{ if(listening)sesBitir(); },15000);
+}
+function bindHold(el){
+  if(!el)return;
+  const bas=e=>{
+    if(e.target.closest('button'))return;      // "Elle Ekle" gibi butonlara karışma
+    if(listening||basili)return;
+    basili=true;
+    try{el.setPointerCapture(e.pointerId);}catch(_){}
+    startVoice();                              // SENKRON — jest zinciri korunur
+    clearTimeout(sureTimer);
+    sureTimer=setTimeout(()=>{ if(listening)sesBitir(); },60000);
+  };
+  const birak=e=>{ if(!basili)return; sesBitir(); };
+  el.addEventListener('pointerdown',bas);
+  el.addEventListener('pointerup',birak);
+  el.addEventListener('pointercancel',birak);
+  el.addEventListener('pointerleave',birak);
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+  el.addEventListener('dragstart',e=>e.preventDefault());
 }
 
 
@@ -1505,8 +1492,6 @@ async function autoSaveVoice(){
     const txt=document.getElementById('voiceText').value.trim();
     const lb=document.getElementById('liveBox');
     if(!txt){
-      // izin yeni verildiyse oradaki yönlendirmeyi ezme
-      if(izinMesajiVar){ izinMesajiVar=false; return; }
       // Sessizce vazgeçme: kullanıcı "hiçbir şey olmuyor" sanmasın
       if(sonHata){ sesDurum(SES_HATALARI[sonHata]||('⚠️ Ses tanıma hatası: '+sonHata),'hata'); }
       else{
@@ -3220,7 +3205,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · onay ekranı düzeltmesi';
+const SURUM='2026-07-28 · basılı tut';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
@@ -3293,19 +3278,11 @@ setInterval(surumKontrol,3600000);
   await loadFabrika();
   if('Notification'in window&&Notification.permission==='default'){try{Notification.requestPermission();}catch(e){}}
   checkReminders();
-  // Ses girişi: Android'de dokun-başlat/dokun-bitir, iPhone'da klavye diktesi
+  // Ses girişi: her platformda mikrofonu basılı tut, konuş, bırak
   const hero=document.getElementById('micHero');
-  hero.addEventListener('click',e=>{
-    if(e.target.closest('button'))return;      // "Elle Ekle" gibi butonlara karışma
-    if(IOS)dikteAc(); else sesToggle();
-  });
-  const h=hero.querySelector('h3'); const ip=document.getElementById('micHint');
-  if(IOS){
-    if(h)h.textContent='Sesle Yaz';
-    if(ip)ip.innerHTML='Dokun, klavyedeki 🎤 ile konuş';
-  }else{
-    if(ip)ip.textContent='Dokun ve konuş';
-  }
+  bindHold(hero);
+  const ip=document.getElementById('micHint');
+  if(ip)ip.textContent='Mikrofonu basılı tut ve konuş';
 })();
 </script>
 </body>
