@@ -268,7 +268,6 @@
         <div id="liveBox" style="display:none;width:100%;padding:0 18px;max-height:120px;overflow-y:auto"></div>
         <div class="row" style="margin-top:6px;justify-content:center">
           <button class="btn sm ghost" onclick="event.stopPropagation();openManual()">✎ Elle Ekle</button>
-          <button class="btn sm ghost" onclick="event.stopPropagation();mikrofonTesti()">🔧 Mikrofon Testi</button>
         </div>
       </div>
       <div class="hero cam" onclick="go('camera')">
@@ -1067,7 +1066,7 @@ function renderFabrika(){
   const box=document.getElementById('fabList'); if(!box)return;
   const patron=CURRENT&&CURRENT.rol==='patron';
   const t=fabrikaTotals();
-  const omer=Object.values(ROLES).find(r=>r.rol==='fabrika');
+  const omer=KULLANICILAR.find(r=>r.rol==='fabrika');
   let html='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">'
     +'<div><div class="muted" style="font-size:12px">Söve m² fiyatı'+(patron&&omer?' · '+escapeHtml(omer.ad):'')+'</div><div style="font-weight:600">'+(SOVE_FIYAT?money(SOVE_FIYAT):'ayarlanmadı')+'</div></div>'
     +(patron?'':'<button class="btn sm ghost" onclick="setSoveFiyat()">Fiyat Ayarla</button>')+'</div></div>';
@@ -1148,7 +1147,7 @@ async function addSite(){
   let mudurId=CURRENT.mudurId;
   if(CURRENT.rol==='patron'){
     // patron hangi müdüre ekliyor?
-    const mudurler=Object.values(ROLES).filter(r=>r.rol==='mudur');
+    const mudurler=KULLANICILAR.filter(r=>r.rol==='mudur'&&String(r.ad||'').trim());
     const secim=prompt('Hangi müdür? '+mudurler.map((m,i)=>(i+1)+') '+m.ad).join('  '),'1');
     const idx=parseInt(secim,10)-1;
     mudurId=(mudurler[idx]||mudurler[0]).mudurId;
@@ -1259,7 +1258,7 @@ function renderSites(){
   }
   box.innerHTML=html;
 }
-function mudurAdi(mid){const r=Object.values(ROLES).find(x=>x.mudurId===mid);return r?r.ad:'—';}
+function mudurAdi(mid){const r=KULLANICILAR.find(x=>x.mudurId===mid);return (r&&r.ad)?r.ad:'—';}
 function manageKalemler(){
   let html='Gider kalemleri:\n\n'+GIDER_KALEMLERI.map((k,i)=>(i+1)+') '+k).join('\n')+'\n\nYeni eklemek için "Gider Kalemi Ekle" butonunu kullan.';
   alert(html);
@@ -1360,17 +1359,48 @@ const FIREBASE_CONFIG={
   appId:"BURAYA_YAPISTIR"
 };
 
-/* 2) PIN kodları — istediğin gibi değiştir: */
-const ROLES={
-  '1234':{rol:'patron', ad:'Patron'},
-  '1111':{rol:'mudur',  ad:'Müdür 1', mudurId:'m1'},
-  '2222':{rol:'mudur',  ad:'Müdür 2', mudurId:'m2'},
-  '3333':{rol:'mudur',  ad:'Müdür 3', mudurId:'m3'},
-  '4444':{rol:'mudur',  ad:'Müdür 4', mudurId:'m4'},
-  '5555':{rol:'mudur',  ad:'Müdür 5', mudurId:'m5'},
-  '6666':{rol:'fabrika',ad:'Ömer',    mudurId:'f1'}
-};
+/* 2) Kullanıcılar — adlar ve PIN'ler uygulama içinden değiştirilebilir.
+   Boş adlı müdür "atanmamış" demektir; patron ad verene kadar giriş yapamaz. */
+const VARSAYILAN_KULLANICILAR=[
+  {mudurId:'patron', rol:'patron',  ad:'Patron', pin:'1234', sabit:true},
+  {mudurId:'m1',     rol:'mudur',   ad:'Hamdi',  pin:'1111'},
+  {mudurId:'m2',     rol:'mudur',   ad:'Fatih',  pin:'2222'},
+  {mudurId:'m3',     rol:'mudur',   ad:'Ahmet',  pin:'3333'},
+  {mudurId:'m4',     rol:'mudur',   ad:'',       pin:'4444'},   // boş — patron atar
+  {mudurId:'m5',     rol:'mudur',   ad:'',       pin:'5555'},   // boş — patron atar
+  {mudurId:'f1',     rol:'fabrika', ad:'Ömer',   pin:'6666'}
+];
+let KULLANICILAR=VARSAYILAN_KULLANICILAR.map(u=>Object.assign({},u));
 /* rol:'fabrika' -> şantiye yerine Fabrika ekranı (Satış + Gider) */
+
+async function loadKullanicilar(){
+  const k=await Store.get('kullanicilar',null);
+  if(k&&k.length){
+    // yeni sürümde eklenen kullanıcı varsa kaybolmasın
+    KULLANICILAR=VARSAYILAN_KULLANICILAR.map(v=>{
+      const eski=k.find(x=>x.mudurId===v.mudurId);
+      return eski?Object.assign({},v,{ad:eski.ad,pin:eski.pin}):Object.assign({},v);
+    });
+  }
+  if(cloudOn&&db){
+    db.ref('kullanicilar').on('value',async snap=>{
+      const v=snap.val();
+      if(!v)return;
+      const liste=Array.isArray(v)?v:Object.values(v);
+      KULLANICILAR=VARSAYILAN_KULLANICILAR.map(d=>{
+        const g=liste.find(x=>x&&x.mudurId===d.mudurId);
+        return g?Object.assign({},d,{ad:g.ad,pin:g.pin}):Object.assign({},d);
+      });
+      await Store.set('kullanicilar',KULLANICILAR);
+      if(document.getElementById('notes')&&document.getElementById('notes').classList.contains('active'))renderTable();
+    });
+  }
+}
+async function kullanicilariKaydet(){
+  await Store.set('kullanicilar',KULLANICILAR);
+  if(cloudOn&&db)try{ await db.ref('kullanicilar').set(KULLANICILAR); }catch(e){}
+}
+function kullaniciBul(pin){ return KULLANICILAR.find(u=>u.pin===String(pin)); }
 
 let CURRENT=null;          // {rol, ad, mudurId}
 let db=null, stg=null, cloudOn=false;
@@ -1388,10 +1418,14 @@ function initFirebase(){
 
 async function doLogin(){
   const pin=document.getElementById('pinInput').value.trim();
-  const r=ROLES[pin];
   const st=document.getElementById('loginStatus');
-  if(!r){ st.textContent='Hatalı PIN.'; return; }
-  CURRENT=r;
+  const u=kullaniciBul(pin);
+  if(!u){ st.textContent='Hatalı PIN.'; return; }
+  if(u.rol==='mudur'&&!String(u.ad||'').trim()){
+    st.innerHTML='Bu müdür henüz atanmadı.<br>Patronun <b>Kullanıcılar</b> bölümünden isim vermesi gerekiyor.';
+    return;
+  }
+  CURRENT={rol:u.rol, ad:u.ad, mudurId:u.mudurId};
   document.getElementById('login').style.display='none';
   document.getElementById('login').classList.remove('active');
   applyRole();
@@ -2820,6 +2854,77 @@ function renderBorcAlacak(){
     +'<div class="muted" style="display:flex;justify-content:space-between">'
       +'<span>Alacak '+money(alacak)+'</span><span>Borç '+money(borc)+'</span></div></div>';
 }
+/* ---------- KULLANICI YÖNETİMİ ---------- */
+function renderKullanicilar(){
+  if(!CURRENT)return '';
+  const patron=CURRENT.rol==='patron';
+
+  // MÜDÜR / FABRİKA: yalnızca kendi şifresini değiştirir
+  if(!patron){
+    return '<div class="card"><div style="font-weight:600;margin-bottom:2px">Şifrem</div>'
+      +'<div class="muted" style="font-size:12px;margin-bottom:10px">'+escapeHtml(CURRENT.ad)
+      +' · PIN yalnızca sizde kalsın.</div>'
+      +'<button class="btn sm ghost" onclick="sifreDegistir(\''+CURRENT.mudurId+'\')">🔑 Şifremi Değiştir</button></div>';
+  }
+
+  // PATRON: adları atar, boş müdürleri doldurur, şifreleri sıfırlayabilir
+  const satir=u=>{
+    const bos=!String(u.ad||'').trim();
+    const etiket=u.rol==='patron'?'Patron':(u.rol==='fabrika'?'Fabrika':'Müdür');
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line)">'
+      +'<div style="flex:1">'
+        +'<div style="font-weight:500'+(bos?';color:var(--sub)':'')+'">'+(bos?'— boş —':escapeHtml(u.ad))+'</div>'
+        +'<div class="muted" style="font-size:12px">'+etiket+' · PIN '+escapeHtml(u.pin)+'</div></div>'
+      +'<div class="row" style="flex:0 0 auto">'
+        +(u.sabit?'':'<button class="btn sm '+(bos?'':'ghost')+'" style="width:auto" onclick="kullaniciAdiAta(\''+u.mudurId+'\')">'+(bos?'Ata':'Adı')+'</button>')
+        +'<button class="btn sm ghost" style="width:auto" onclick="sifreDegistir(\''+u.mudurId+'\')">🔑</button>'
+      +'</div></div>';
+  };
+  const bosSayi=KULLANICILAR.filter(u=>u.rol==='mudur'&&!String(u.ad||'').trim()).length;
+  return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">'
+      +'<div style="font-weight:600">Kullanıcılar</div>'
+      +(bosSayi?'<span class="pill" style="color:#a9761e">'+bosSayi+' boş</span>':'')+'</div>'
+    +'<div class="muted" style="font-size:12px;margin-top:4px">Boş müdüre isim verilene kadar o PIN ile giriş yapılamaz.</div>'
+    +KULLANICILAR.map(satir).join('')
+    +'</div>';
+}
+async function kullaniciAdiAta(mudurId){
+  const u=KULLANICILAR.find(x=>x.mudurId===mudurId); if(!u)return;
+  const ad=prompt(u.ad?'Yeni ad:':'Bu müdüre isim verin:',u.ad||'');
+  if(ad===null)return;
+  const t=ad.trim();
+  if(t&&KULLANICILAR.some(x=>x.mudurId!==mudurId&&trLower(x.ad||'')===trLower(t))){
+    alert('Bu isim başka bir kullanıcıda var.');return;
+  }
+  u.ad=t;
+  await kullanicilariKaydet();
+  if(CURRENT&&CURRENT.mudurId===mudurId)CURRENT.ad=t;
+  renderTable();
+  alert(t?('✓ '+t+' atandı. PIN: '+u.pin):'Kullanıcı boşaltıldı, bu PIN ile giriş yapılamaz.');
+}
+async function sifreDegistir(mudurId){
+  const u=KULLANICILAR.find(x=>x.mudurId===mudurId); if(!u)return;
+  const kendisi=CURRENT&&CURRENT.mudurId===mudurId;
+  // Kendi şifresini değiştiren önce mevcut şifresini doğrular
+  if(kendisi){
+    const eski=prompt('Mevcut PIN:','');
+    if(eski===null)return;
+    if(eski.trim()!==u.pin){ alert('Mevcut PIN yanlış.'); return; }
+  }
+  const yeni=prompt('Yeni PIN (4-8 rakam):','');
+  if(yeni===null)return;
+  const p=yeni.trim();
+  if(!/^\d{4,8}$/.test(p)){ alert('PIN yalnızca rakam olmalı ve en az 4 haneli olmalı.'); return; }
+  if(KULLANICILAR.some(x=>x.mudurId!==mudurId&&x.pin===p)){ alert('Bu PIN başka bir kullanıcıda kullanılıyor.'); return; }
+  const tekrar=prompt('Yeni PIN (tekrar):','');
+  if(tekrar===null)return;
+  if(tekrar.trim()!==p){ alert('İki PIN aynı değil.'); return; }
+  u.pin=p;
+  await kullanicilariKaydet();
+  renderTable();
+  alert('✓ PIN güncellendi.'+(kendisi?'\n\nYeni PIN\'i unutmayın.':''));
+}
+
 /* ---------- BELGE BEKLEYEN KAYITLAR ---------- */
 function renderBelgeBekleyen(){
   const list=belgesizKayitlarim();
@@ -2851,7 +2956,22 @@ function renderTable(){
   NOTES.forEach(n=>(n.items||[]).forEach((it,idx)=>rows.push({noteId:n.id,idx,
     tarih:fmt(n.createdAt),kategori:it.known||it.category,grup:it.grup||'—',
     tutar:it.amount,taninan:!!it.known,anomali:!!it.anomali,mudur:n.mudur||''})));
-  if(!rows.length){box.innerHTML='<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>';return;}
+  /* Kayıt yokken de yönetim kartları görünmeli: aksi halde patron ilk
+     kurulumda müdür atayamıyor, müdür şifresini değiştiremiyordu. */
+  if(!rows.length){
+    box.innerHTML=renderKullanicilar()
+      +'<div class="card"><div style="font-weight:500;margin-bottom:4px">Yedekleme</div>'
+      +'<div class="muted" style="margin-bottom:10px">Veriler telefonda saklanıyor. Düzenli yedek al.</div>'
+      +'<div class="row"><button class="btn sm ghost" onclick="logout()">Çıkış Yap</button>'
+      +'<button class="btn sm" onclick="backupAll()">Yedek Al</button>'
+      +'<label class="btn sm ghost" style="text-align:center">Geri Yükle'
+      +'<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)"></label></div>'
+      +'<div class="muted" style="margin-top:10px;font-size:11px;display:flex;justify-content:space-between;align-items:center">'
+        +'<span>sürüm '+SURUM+'</span>'
+        +'<span onclick="guncellemeKontrol()" style="cursor:pointer;text-decoration:underline">güncelle</span></div></div>'
+      +'<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>';
+    return;
+  }
   // Borç/alacak gider değildir; kendi kartında toplanır, gider toplamına girmez
   const toplam=rows.filter(r=>r.taninan&&r.grup!=='Borç/Alacak').reduce((a,b)=>a+b.tutar,0);
   const borcVar=rows.some(r=>r.grup==='Borç/Alacak');
@@ -2915,6 +3035,7 @@ function renderTable(){
        +'<span>sürüm '+SURUM+'</span>'
        +'<span onclick="guncellemeKontrol()" style="cursor:pointer;text-decoration:underline">güncelle</span></div>'
      +'</div>'
+     +renderKullanicilar()
      +renderBelgeBekleyen()
      +renderBorcAlacak()
      +html;
@@ -3649,7 +3770,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · bulut hazır';
+const SURUM='2026-07-28 · kullanıcılar';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
@@ -3712,6 +3833,7 @@ setInterval(surumKontrol,3600000);
   const cw=document.getElementById('cloudWarn');
   if(cw&&!cloudOn)cw.textContent='Bulut bağlı değil — girişler sadece bu cihazda kalır. (Firebase config eklenmedi)';
   const sb=document.getElementById('surumBilgi'); if(sb)sb.textContent='sürüm '+SURUM;
+  await loadKullanicilar();          // adlar ve PIN'ler giriş ekranından önce hazır olmalı
   NOTES=await Store.get('notes',[]);
   PAYMENTS=await Store.get('payments',[]);
   LEXICON=await Store.get('lexicon',[]);
