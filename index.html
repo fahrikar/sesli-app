@@ -171,9 +171,12 @@
   <!-- HOME -->
   <section class="screen" id="home">
     <div id="reminderBox"></div>
-    <div class="card" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div><div class="muted" style="font-size:12px">Aktif şantiye</div><div id="aktifSantiye" style="font-weight:600">Şantiye seçilmedi</div></div>
-      <button class="btn sm ghost" onclick="go('sites')">Değiştir</button>
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="muted" style="font-size:12px">Aktif şantiye</div><div id="aktifSantiye" style="font-weight:600">Şantiye seçilmedi</div></div>
+        <button class="btn sm ghost" onclick="go('sites')">Değiştir</button>
+      </div>
+      <div id="homeStats" style="display:flex;gap:10px;margin-top:12px"></div>
     </div>
     <div class="split">
       <div class="hero mic" id="micHero">
@@ -351,6 +354,21 @@
       </div>
     </div>
   </div>
+
+  <!-- KALEM DÜZENLE -->
+  <div id="editModal" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:50;padding:18px;align-items:center;justify-content:center">
+    <div class="card" style="max-width:440px;margin:auto;width:100%">
+      <div style="font-weight:600;font-size:17px;margin-bottom:10px">Kalemi Düzenle</div>
+      <label>Kategori</label>
+      <select id="editCat" style="width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#fffdf8;font-size:15px"></select>
+      <label>Tutar (₺)</label>
+      <input id="editAmt" type="number" inputmode="decimal" placeholder="0">
+      <div class="row" style="margin-top:16px">
+        <button class="btn sm green" onclick="submitEdit()">Kaydet</button>
+        <button class="btn sm ghost" onclick="closeEdit()">İptal</button>
+      </div>
+    </div>
+  </div>
 </main>
 
 <nav>
@@ -518,10 +536,9 @@ Cümle: "${cumle}"`;
 let AI_PENDING=null;
 async function processWithAI(txt){
   const lb=document.getElementById('liveBox');
-  // AI kurulu değilse: sessiz yedek olarak kural bazlı çözümle, yine onaya sun
+  // AI kurulu değilse: cümleyi yerel çözümleyiciyle ayrıştır, onaya sun
   if(!aiHazir()){
-    const items=parseItems(txt).filter(i=>i.known);
-    showAiConfirm(items,txt,true);
+    showAiConfirm(parseItems(txt),txt,'yerel');
     return;
   }
   if(lb){lb.style.display='block';lb.innerHTML='<div class="muted" style="padding:12px">Yapay zekâ cümleyi çözümlüyor…</div>';}
@@ -531,8 +548,7 @@ async function processWithAI(txt){
     showAiConfirm(items,txt);
   }catch(e){
     if(lb){lb.style.display='none';lb.innerHTML='';}
-    const items=parseItems(txt).filter(i=>i.known);
-    showAiConfirm(items,txt,true);
+    showAiConfirm(parseItems(txt),txt,'hata');
   }
 }
 function showAiConfirm(items,rawText,fallback){
@@ -552,13 +568,15 @@ function showAiConfirm(items,rawText,fallback){
     +'<div class="muted" style="margin-bottom:10px">"'+escapeHtml(rawText)+'"</div>';
   items.forEach((it,i)=>{
     html+='<div style="padding:10px 0;border-top:1px solid var(--line)">'
-      +'<div style="display:flex;justify-content:space-between"><b>'+escapeHtml(it.category)+'</b><b>'+money(it.amount)+'</b></div>'
+      +'<div style="display:flex;justify-content:space-between;gap:8px"><b>'+escapeHtml(it.category)+'</b><b style="white-space:nowrap">'+money(it.amount)+'</b></div>'
+      +(it.known?'<div class="muted" style="font-size:12px">'+escapeHtml(it.grup||'')+'</div>'
+                :'<div class="muted" style="font-size:12px;color:#a9761e">tanımsız · kaydettikten sonra Tablo\'dan düzeltebilirsin</div>')
       +(it.kisi?'<div class="muted">Kişi: '+escapeHtml(it.kisi)+'</div>':'')
       +(it.odemeGunu?'<div class="muted">Ödeme günü: '+escapeHtml(it.odemeGunu)+'</div>':'')
       +'</div>';
   });
   resetOdeme();
-  html+=(fallback?'<div class="muted" style="margin-top:8px">(AI bağlanamadı, basit çözümleme kullanıldı)</div>':'')
+  html+=(fallback==='hata'?'<div class="muted" style="margin-top:8px">(Yapay zekâya ulaşılamadı, cihaz içi çözümleme kullanıldı)</div>':'')
     +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+odemeSecHTML()+kdvSecHTML()+'</div>'
     +'<div class="row" style="margin-top:14px"><button class="btn sm green" onclick="confirmAi()">Onayla</button>'
     +'<button class="btn sm ghost" onclick="cancelAi()">İptal</button></div></div>';
@@ -566,7 +584,8 @@ function showAiConfirm(items,rawText,fallback){
   // cümleyi ve algılananları sesli tekrar et
   const ozet=items.map(it=>it.category+' '+Math.round(it.amount).toLocaleString('tr-TR')
       +(it.kisi?' '+it.kisi:'')+(it.odemeGunu?' ödeme günü '+it.odemeGunu:'')).join(', ');
-  speak('Şunu anladım: '+ozet+'. Onaylıyor musun?','kayit');
+  const tanimsizSayi=items.filter(it=>!it.known).length;
+  speak('Şunu anladım: '+ozet+'.'+(tanimsizSayi?' '+tanimsizSayi+' kalem tanımsız.':'')+' Onaylıyor musun?','kayit');
   sesleOnayDinle(()=>confirmAi(), ()=>cancelAi());
 }
 async function confirmAi(){
@@ -969,9 +988,18 @@ async function pushCloudNote(note){
 
 /* ---------- storage (kalıcı; yoksa hafızada) ---------- */
 const mem={};
+const LS_PREFIX='sesli:';   // localStorage anahtar öneki
 const Store={
-  async get(k,d){ try{ if(window.storage){const r=await window.storage.get(k); return r?JSON.parse(r.value):d;} }catch(e){} return mem[k]!==undefined?mem[k]:d; },
-  async set(k,v){ mem[k]=v; try{ if(window.storage){await window.storage.set(k,JSON.stringify(v));} }catch(e){} }
+  async get(k,d){
+    try{ if(window.storage){const r=await window.storage.get(k); return r?JSON.parse(r.value):d;} }catch(e){}
+    try{ if(window.localStorage){const r=localStorage.getItem(LS_PREFIX+k); if(r!==null)return JSON.parse(r);} }catch(e){}
+    return mem[k]!==undefined?mem[k]:d;
+  },
+  async set(k,v){
+    mem[k]=v;
+    try{ if(window.storage){await window.storage.set(k,JSON.stringify(v));} }catch(e){}
+    try{ if(window.localStorage){localStorage.setItem(LS_PREFIX+k,JSON.stringify(v));} }catch(e){}
+  }
 };
 let NOTES=[], PAYMENTS=[];
 
@@ -982,7 +1010,7 @@ function go(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(secId).classList.add('active');
   document.getElementById('hdrTitle').textContent=titles[id]||'Kayıt';
-  if(id==='home'){const sn=document.getElementById('aktifSantiye'); if(sn){const st=SITES.find(x=>x.id===AKTIF_SANTIYE);sn.textContent=st?st.ad:'Şantiye seçilmedi';}}
+  if(id==='home'){const sn=document.getElementById('aktifSantiye'); if(sn){const st=SITES.find(x=>x.id===AKTIF_SANTIYE);sn.textContent=st?st.ad:'Şantiye seçilmedi';} renderHomeStats();}
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   const map={sites:'nSites',home:'nHome',notes:'nNotes',reports:'nReports',stock:'nStock',muhasebe:'nMuh',payments:'nPayments'};
   if(map[id])document.getElementById(map[id]).classList.add('on');
@@ -1483,26 +1511,69 @@ function toNumber(str){
   else if(hasDot){ r=/\.\d{3}(\.|$)/.test(r)?r.replace(/\./g,''):r; }
   const n=parseFloat(r); return isNaN(n)?null:n;
 }
+/* Etikette anlam taşımayan dolgu/fiil kelimeleri (yalnızca görünen ad için temizlenir) */
+const LABEL_FILLER=/(^|\s)(bugün|bugun|dün|dun|yarın|yarin|de|da|te|ta|ile|için|icin|tl|lira|liralık|liralik|adet|tane|toplam|olarak|kadar|para|tutar|bir|de bir|ödedim|odedim|ödendi|odendi|ödedik|verdim|verildi|verdik|aldım|aldim|aldık|harcadım|harcadim|harcandı|harcandi|gitti|geldi|oldu|olsun|yaptım|yaptim|çektim|cektim|sonra|ayrıca|ayrica|örneğin|ornegin)(?=\s|$)/gi;
+function stripFiller(s){ let p=null,c=s||''; while(p!==c){p=c;c=c.replace(LABEL_FILLER,' ');} return c.replace(/\s+/g,' ').trim(); }
+
+/* Doğal cümleyi anla: tutarları bul, her birini en yakın kategori kelimesiyle eşleştir */
 function parseItems(text){
-  const FILLER=/(^|\s)(bugün|dün|yarın|oldu|olsun|ödendi|ödedim|aldım|verdim|geldi|gitti|tane|adet|toplam|için|tl|lira|₺)(?=\s|$)/gi;
-  const clean=wordsToNumbers(text).replace(/örneğin|ayrıca|bir de/gi,' ').replace(/\s+ve\s+/gi,' ')
-                  .replace(/[,;:!?]\s/g,' ').replace(/\s+/g,' ').trim();
-  const re=/([^\d]+?)\s*(\d+(?:[.,]\d+)*)\s*(bin|milyon)?/gi;
-  const out=[]; let m;
+  const clean=wordsToNumbers(text)
+      .replace(/\bve\b/gi,' ')
+      .replace(/[,;:!?]/g,' ')
+      .replace(/\s+/g,' ').trim();
+  // cümledeki tüm tutarları konumlarıyla topla
+  const re=/(\d+(?:[.,]\d+)*)\s*(bin|milyon|milyar)?/gi;
+  const found=[]; let m;
   while((m=re.exec(clean))!==null){
-    let num=toNumber(m[2]); if(num===null)continue;
-    const mult=(m[3]||'').toLowerCase();
-    if(mult==='bin')num*=1000; else if(mult==='milyon')num*=1000000;
-    let cat=(m[1]||'');
-    let prev=null;
-    while(prev!==cat){prev=cat;cat=cat.replace(FILLER,' ');}
-    cat=cat.replace(/\s+/g,' ').trim();
-    if(!cat)cat='Diğer';
-    cat=cat.charAt(0).toLocaleUpperCase('tr-TR')+cat.slice(1);
-    const mc=matchCategory(cat);
-    out.push({category:cat,amount:num,raw:(m[0]||'').trim(),
-              known:mc?mc.ad:null, grup:mc?mc.grup:null});
+    let num=toNumber(m[1]); if(num===null)continue;
+    const mult=trLower(m[2]||'');
+    if(mult==='bin')num*=1e3; else if(mult==='milyon')num*=1e6; else if(mult==='milyar')num*=1e9;
+    found.push({num,start:m.index,end:re.lastIndex,raw:m[0].trim()});
   }
+  const out=[];
+  let oncekiTuketti=false;   // bir önceki tutar, aradaki metni etiket olarak kullandı mı?
+  found.forEach((f,i)=>{
+    const prevEnd  = i>0 ? found[i-1].end : 0;
+    const nextStart= i<found.length-1 ? found[i+1].start : clean.length;
+    // aradaki metni önceki tutar aldıysa ("2500 boya" gibi) bu tutar onu tekrar kullanmaz
+    const before   = oncekiTuketti ? '' : clean.slice(prevEnd,f.start);
+    const after    = clean.slice(f.end,nextStart);       // sayıdan sonraki kelimeler
+    oncekiTuketti=false;
+    // kategori: önce sayıdan ÖNCEki etiket ("işçilere 3000")
+    let mc=matchCategory(before), afterUsed='';
+    // bulunamazsa sayıdan SONRAki etikete bak ("15 bin demir")
+    if(!mc){
+      // "sonra / ayrıca / bir de" gibi bağlaçlar yeni kalemin başladığını gösterir:
+      // bu durumda sonraki metin bir sonraki tutara aittir, buraya alınmaz.
+      const yeniKalemBasi=/^\s*(sonra|sonrasında|ondan sonra|daha sonra|ayrıca|ayrica|bir de|birde|arkasından)\b/i.test(after);
+      if(!yeniKalemBasi){
+        // Etiket ancak sayıya BİTİŞİKse bu tutara aittir ("15 bin demir").
+        // Araya fiil/bağlaç girmişse ("250 gitti yakıta") o etiket sonraki kaleme aittir.
+        // yalnızca birim kelimeleri atlanır ("3000 lira yakıta"); fiiller sınır sayılır
+        const BIRIM=/^(lira|liralık|liralik|tl|₺|adet|tane|para|tutar|olarak|kadar|değerinde|degerinde)$/i;
+        const sozcukler=after.split(/\s+/).filter(Boolean);
+        while(sozcukler.length&&BIRIM.test(sozcukler[0]))sozcukler.shift();
+        const bakilacak=(i===found.length-1)?sozcukler.slice(0,3):sozcukler.slice(0,1);
+        for(let w=1;w<=bakilacak.length;w++){
+          const aday=bakilacak.slice(0,w).join(' ');
+          const m2=matchCategory(aday);
+          if(m2){ mc=m2; afterUsed=aday; break; }
+          if(w===1&&i<found.length-1)break;   // bitişik değilse vazgeç
+        }
+        if(mc&&i<found.length-1)oncekiTuketti=true;   // bu metin bu kaleme ait; sonraki tutar kullanmasın
+      }
+    }
+    // görünen ad
+    let label;
+    if(mc){ label=mc.ad; }
+    else{
+      let lbl=stripFiller(before);
+      if(!lbl) lbl=stripFiller(afterUsed);
+      label=lbl?lbl.charAt(0).toLocaleUpperCase('tr-TR')+lbl.slice(1):'Diğer';
+    }
+    out.push({category:label,amount:f.num,raw:(before+f.raw).replace(/\s+/g,' ').trim(),
+              known:mc?mc.ad:null, grup:mc?mc.grup:null});
+  });
   return out;
 }
 function money(n){return n.toLocaleString('tr-TR',{minimumFractionDigits:0,maximumFractionDigits:2})+' ₺'}
@@ -1689,8 +1760,32 @@ async function saveNote(type){
   alert((bil.length?'✅ '+bil.length+' kalem tanındı:\n'+bil.map(i=>'• '+i.known+': '+money(i.amount)).join('\n'):'✅ Kaydedildi.')
     +(bilm.length?'\n\n⚠️ '+bilm.length+' kalem tanımlanamadı, Excel\'e eklenmeyecek:\n'+bilm.map(i=>'• '+i.category).join('\n'):''));
 }
+function renderHomeStats(){
+  const box=document.getElementById('homeStats'); if(!box)return;
+  const bugun=todayStr();
+  let bugunToplam=0, santiyeToplam=0, genelToplam=0;
+  NOTES.forEach(n=>{
+    const gunu=(n.createdAt||'').slice(0,10);
+    (n.items||[]).forEach(it=>{
+      if(!it.known)return;                       // sadece tanınan kalemler
+      const tutar=it.amount||0;
+      genelToplam+=tutar;
+      if(gunu===bugun)bugunToplam+=tutar;
+      if(AKTIF_SANTIYE&&n.siteId===AKTIF_SANTIYE)santiyeToplam+=tutar;
+    });
+  });
+  const st=SITES.find(x=>x.id===AKTIF_SANTIYE);
+  const ikinci=AKTIF_SANTIYE
+    ? {ad:(st?st.ad:'Şantiye')+' toplam', val:santiyeToplam}
+    : {ad:'Genel toplam', val:genelToplam};
+  const kutu=(ad,val)=>'<div style="flex:1;background:#faf6ee;border:1px solid var(--line);border-radius:14px;padding:10px 12px">'
+    +'<div class="muted" style="font-size:11px">'+escapeHtml(ad)+'</div>'
+    +'<div style="font-weight:700;font-size:16px;margin-top:2px">'+money(val)+'</div></div>';
+  box.innerHTML=kutu('Bugün',bugunToplam)+kutu(ikinci.ad,ikinci.val);
+}
 function renderNotes(){ renderTable(); }
 function renderTable(){
+  renderHomeStats();
   const box=document.getElementById('tableBox');
   if(!box)return;
   const rows=[];
@@ -1706,7 +1801,7 @@ function renderTable(){
    +'<th style="text-align:left;padding:10px 8px;font-weight:600">Tarih</th>'
    +'<th style="text-align:left;padding:10px 8px;font-weight:600">Kategori</th>'
    +'<th style="text-align:right;padding:10px 8px;font-weight:600">Tutar</th>'
-   +'<th style="width:34px"></th></tr></thead><tbody>';
+   +'<th style="width:58px"></th></tr></thead><tbody>';
   rows.forEach(r=>{
     html+='<tr style="border-top:1px solid var(--line)'+(r.taninan?'':';background:#fdf6e6')+'">'
       +'<td style="padding:9px 8px;color:var(--sub);white-space:nowrap">'+r.tarih.split(' ')[0]+'</td>'
@@ -1715,7 +1810,9 @@ function renderTable(){
         +(r.taninan?'<div class="muted" style="font-size:11px">'+escapeHtml(r.grup)+'</div>'
                    :'<div class="muted" style="font-size:11px">tanımsız · Excel\'e girmez</div>')+'</td>'
       +'<td style="padding:9px 8px;text-align:right;font-weight:600;white-space:nowrap">'+money(r.tutar)+'</td>'
-      +'<td style="padding:9px 4px;text-align:center"><span onclick="delRow('+r.noteId+','+r.idx+')" style="cursor:pointer;color:#b23b34;font-size:16px">×</span></td></tr>';
+      +'<td style="padding:9px 4px;text-align:center;white-space:nowrap">'
+        +'<span onclick="editRow('+r.noteId+','+r.idx+')" style="cursor:pointer;color:#6a635a;font-size:15px;margin-right:9px">✎</span>'
+        +'<span onclick="delRow('+r.noteId+','+r.idx+')" style="cursor:pointer;color:#b23b34;font-size:16px">×</span></td></tr>';
   });
   html+='<tr style="border-top:2px solid var(--line);background:#faf6ee">'
     +'<td colspan="2" style="padding:11px 8px;font-weight:700">TOPLAM</td>'
@@ -1776,6 +1873,37 @@ async function delRow(noteId,idx){
   n.items.splice(idx,1);
   if(!n.items.length&&!n.text)NOTES=NOTES.filter(x=>x.id!==noteId);
   await Store.set('notes',NOTES); renderTable();
+}
+
+/* ---------- KALEM DÜZENLEME ---------- */
+let EDIT_TARGET=null;
+function editRow(noteId,idx){
+  const n=NOTES.find(x=>x.id===noteId); if(!n)return;
+  const it=(n.items||[])[idx]; if(!it)return;
+  EDIT_TARGET={noteId,idx};
+  const cur=it.known||it.category||'';
+  const sel=document.getElementById('editCat');
+  sel.innerHTML=CATEGORY_MAP.map(c=>'<option value="'+c.ad+'"'+(trLower(c.ad)===trLower(cur)?' selected':'')+'>'+c.ad+'</option>').join('');
+  document.getElementById('editAmt').value=it.amount||'';
+  document.getElementById('editModal').style.display='flex';
+}
+function closeEdit(){ EDIT_TARGET=null; document.getElementById('editModal').style.display='none'; }
+async function submitEdit(){
+  if(!EDIT_TARGET)return;
+  const n=NOTES.find(x=>x.id===EDIT_TARGET.noteId); if(!n){closeEdit();return;}
+  const it=(n.items||[])[EDIT_TARGET.idx]; if(!it){closeEdit();return;}
+  const yeniKat=document.getElementById('editCat').value;
+  const yeniTutar=toNumber(String(document.getElementById('editAmt').value).replace(',','.'));
+  if(!yeniTutar||yeniTutar<=0){alert('Geçerli bir tutar gir.');return;}
+  const mc=CATEGORY_MAP.find(c=>c.ad===yeniKat);
+  it.category=yeniKat;
+  it.known=yeniKat;                     // artık tanımlı bir kategori
+  it.grup=mc?mc.grup:(it.grup||'Gider');
+  it.amount=yeniTutar;
+  delete it.anomali;
+  await Store.set('notes',NOTES);
+  closeEdit(); renderTable();
+  speak(yeniKat+' '+Math.round(yeniTutar).toLocaleString('tr-TR')+' olarak güncellendi.','kayit');
 }
 
 function exportTableCSV(){
