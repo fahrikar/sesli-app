@@ -121,6 +121,10 @@
   nav svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   nav button.on{color:var(--ink)}
 
+  /* onay katmanı: kartlar ortalanır, uzun içerik kaydırılır */
+  #confirmBox>.card{max-width:520px;margin:0 auto 12px}
+  #confirmBox{text-align:left}
+
   video,canvas{width:100%;border-radius:16px;background:#0c0c0e}
   .rec-dot{width:9px;height:9px;border-radius:50%;background:var(--danger);display:inline-block;animation:pulse 1s infinite}
   @keyframes pulse{50%{opacity:.3}}
@@ -216,8 +220,7 @@
         </div>
         <h3>Sesli Komut</h3>
         <p id="micHint">Konuş ya da elle ekle</p>
-        <div id="liveBox" style="display:none;width:100%;padding:0 18px"></div>
-        <div id="confirmBox" style="display:none;width:100%;max-width:520px;padding:0 18px;margin:0 auto"></div>
+        <div id="liveBox" style="display:none;width:100%;padding:0 18px;max-height:120px;overflow-y:auto"></div>
         <div class="row" style="margin-top:6px;justify-content:center">
           <button class="btn sm ghost" onclick="event.stopPropagation();openManual()">✎ Elle Ekle</button>
           <button class="btn sm ghost" onclick="event.stopPropagation();mikrofonTesti()">🔧 Mikrofon Testi</button>
@@ -369,7 +372,12 @@
     <div id="payList"></div>
   </section>
 
-  <div id="manualModal" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:50;padding:18px;align-items:center;justify-content:center">
+  <!-- ONAY / SONUÇ KATMANI — kart içinde değil, tam ekran ve kaydırılabilir.
+       (Mikrofon kartı overflow:hidden olduğu için içindeyken "Onayla" butonu
+       ekran dışında kalıyor ve tıklanamıyordu.) -->
+  <div id="confirmBox" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:60;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 16px 96px"></div>
+
+  <div id="manualModal" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:50;padding:18px;align-items:center;justify-content:center;overflow-y:auto">
     <div class="card" style="max-width:440px;margin:auto;width:100%">
       <div style="font-weight:600;font-size:17px;margin-bottom:10px">Elle Kalem Ekle</div>
       <div id="manualRows"></div>
@@ -382,7 +390,7 @@
   </div>
 
   <!-- KALEM DÜZENLE -->
-  <div id="editModal" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:50;padding:18px;align-items:center;justify-content:center">
+  <div id="editModal" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:50;padding:18px;align-items:center;justify-content:center;overflow-y:auto">
     <div class="card" style="max-width:440px;margin:auto;width:100%">
       <div style="font-weight:600;font-size:17px;margin-bottom:10px">Kalemi Düzenle</div>
       <label>Kategori</label>
@@ -604,7 +612,8 @@ async function sonucuIsle(items,txt,fallback){
     otomatikOzet(not,anomali);
     return;
   }
-  showAiConfirm(items,txt,fallback);
+  // cümlede geçen ödeme yöntemi onay ekranında da seçili gelsin
+  showAiConfirm(items,txt,fallback,false,odemeYontemiTespit(txt));
 }
 async function processWithAI(txt){
   const lb=document.getElementById('liveBox');
@@ -658,7 +667,7 @@ async function sonKaydiGeriAl(id){
   speak('Kayıt geri alındı.','kayit');
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2000);
 }
-function showAiConfirm(items,rawText,fallback,elle){
+function showAiConfirm(items,rawText,fallback,elle,yontem){
   const box=document.getElementById('confirmBox');
   if(!box)return;
   AI_PENDING={items,rawText,elle:!!elle};
@@ -688,6 +697,8 @@ function showAiConfirm(items,rawText,fallback,elle){
     +'<div class="row" style="margin-top:14px"><button class="btn sm green" onclick="confirmAi()">Onayla</button>'
     +'<button class="btn sm ghost" onclick="cancelAi()">İptal</button></div></div>';
   box.innerHTML=html;
+  // cümlede ödeme yöntemi geçtiyse seçili gelsin (belge alanı da açılsın)
+  if(yontem&&ODEME_YONTEMLERI.some(x=>x.k===yontem))secOdeme(yontem);
   // cümleyi ve algılananları sesli tekrar et
   const ozet=items.map(it=>it.category+' '+Math.round(it.amount).toLocaleString('tr-TR')
       +(it.kisi?' '+it.kisi:'')+(it.odemeGunu?' ödeme günü '+it.odemeGunu:'')).join(', ');
@@ -695,6 +706,16 @@ function showAiConfirm(items,rawText,fallback,elle){
   speak('Şunu anladım: '+ozet+'.'+(tanimsizSayi?' '+tanimsizSayi+' kalem tanımsız.':'')+' Onaylıyor musun?','kayit');
   sesleOnayDinle(()=>confirmAi(), ()=>cancelAi());
 }
+/* Müdürün kaydı bir şantiyeye bağlı olmalı; yoksa patron o kaydı göremez. */
+function santiyeSeciliMi(){
+  if(!CURRENT||CURRENT.rol!=='mudur')return true;     // patron/fabrika muaf
+  if(AKTIF_SANTIYE&&SITES.some(s=>s.id===AKTIF_SANTIYE))return true;
+  sesDurum('⚠️ <b>Önce şantiye seçin.</b><br>Şantiye seçmeden yapılan kayıt patronun ekranına düşmez. '
+    +'Alttaki <b>Şantiye</b> sekmesinden bir şantiye açın.','hata');
+  speak('Önce şantiye seçin.','kayit');
+  return false;
+}
+
 /* Kaydetme çekirdeği — hem onaylı hem otomatik yol bunu kullanır */
 async function kalemleriKaydet(items,rawText,opt){
   opt=opt||{};
@@ -1476,32 +1497,6 @@ function sessizlikSayaciniSifirla(){
   sessizlikTimer=setTimeout(()=>{ if(listening)sesBitir(); },3000);
 }
 
-/* ---------- BASILI TUT / BIRAK (eski yöntem, yedek) ---------- */
-let holdTimer=null, held=false;
-function bindHold(el,opts={}){
-  if(!el)return;
-  const down=e=>{
-    e.preventDefault(); held=false; basili=true;
-    holdTimer=setTimeout(()=>{ held=true; startVoice(); },140);
-  };
-  const up=e=>{
-    e.preventDefault(); clearTimeout(holdTimer); basili=false;
-    if(held){ stopVoice(); autoSaveVoice(); }
-    else{ // kısa dokunuş: sessiz kalma, ne yapılacağını söyle
-      stopVoice();   // izin beklerken bırakıldıysa başlatmayı iptal et
-      sesDurum('🎤 Mikrofonu <b>basılı tutun</b>, konuşun, bitince bırakın.','uyari');
-      setTimeout(()=>{ if(!listening)sesDurum(''); },3500);
-    }
-  };
-  el.addEventListener('pointerdown',e=>{ try{el.setPointerCapture(e.pointerId);}catch(_){}; down(e); });
-  el.addEventListener('pointerup',up);
-  el.addEventListener('pointercancel',up);
-  el.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
-  el.addEventListener('touchend',e=>e.preventDefault(),{passive:false});
-  el.addEventListener('contextmenu',e=>{e.preventDefault();return false;});
-  el.addEventListener('selectstart',e=>e.preventDefault());
-  el.addEventListener('dragstart',e=>e.preventDefault());
-}
 
 
 /* ---------- KAYIT BIRAKILINCA OTOMATİK KAYDET ---------- */
@@ -1544,6 +1539,7 @@ async function autoSaveVoice(){
       return;
     }
     // HERKES: serbest cümle -> AI ayrıştırır -> onaya sunulur
+    if(!santiyeSeciliMi())return;
     processWithAI(txt);
     return;
     // (aşağısı artık kullanılmıyor - AI akışı devrede)
@@ -1604,6 +1600,10 @@ async function submitManual(){
     }
   });
   if(!items.length){alert('En az bir geçerli tutar gir.');return;}
+  if(CURRENT&&CURRENT.rol==='mudur'&&!(AKTIF_SANTIYE&&SITES.some(s=>s.id===AKTIF_SANTIYE))){
+    alert('⚠️ Önce şantiye seçin.\n\nŞantiye seçmeden yapılan kayıt patronun ekranına düşmez.');
+    return;
+  }
   closeManual();
   const ozet=items.map(i=>i.known+' '+i.amount).join(', ');
   // Müdür kendi onay ekranından geçer
@@ -2299,15 +2299,10 @@ async function saveNote(type){
   const el=type==='voice'?'voiceText':'ocrText';
   const txt=document.getElementById(el).value.trim();
   if(!txt){alert('Kaydedilecek metin yok.');return;}
-  // HERKES: metni AI ayrıştırsın, onaya sun
-  document.getElementById(el).value='';
   go('home');
-  processWithAI(txt);
-  return;
+  if(!santiyeSeciliMi())return;
   document.getElementById(el).value='';
-  const bil=items.filter(i=>i.known), bilm=items.filter(i=>!i.known);
-  alert((bil.length?'✅ '+bil.length+' kalem tanındı:\n'+bil.map(i=>'• '+i.known+': '+money(i.amount)).join('\n'):'✅ Kaydedildi.')
-    +(bilm.length?'\n\n⚠️ '+bilm.length+' kalem tanımlanamadı, Excel\'e eklenmeyecek:\n'+bilm.map(i=>'• '+i.category).join('\n'):''));
+  processWithAI(txt);
 }
 function renderHomeStats(){
   const box=document.getElementById('homeStats'); if(!box)return;
@@ -3225,7 +3220,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · dokun-konuş';
+const SURUM='2026-07-28 · onay ekranı düzeltmesi';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
