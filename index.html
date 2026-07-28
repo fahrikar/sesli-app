@@ -248,6 +248,7 @@
         <button class="btn sm ghost" id="santiyeBtn" onclick="go('sites')">Değiştir</button>
       </div>
       <div id="homeStats" style="display:flex;gap:10px;margin-top:12px"></div>
+      <div id="belgeUyari"></div>
     </div>
     <div class="split">
       <div class="hero mic" id="micHero">
@@ -713,12 +714,26 @@ function otomatikOzet(not,anomali){
         +(i.kisi?' · '+escapeHtml(i.kisi):'')+(i.odemeGunu?' · vade '+fmtDate(i.odemeGunu):'')+'</div></div>'
         +'<b style="white-space:nowrap">'+money(i.amount)+'</b></div>').join('')
     +'<div class="muted" style="margin-top:8px;font-size:12px">'+escapeHtml(not.odeme)+'</div>'
+    // Kayıt anında belgeye yönlendir: fişi çekmenin en kolay olduğu an burasıdır
+    +(not.belge?'':'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">'
+        +'<div style="font-weight:600;margin-bottom:2px">📷 Fişi/faturayı ekleyin</div>'
+        +'<div class="muted" style="font-size:12px;margin-bottom:10px">Şimdi çekmek en kolayı. Elinizde yoksa sonra ekleyebilirsiniz.</div>'
+        +'<div class="row"><button class="btn sm green" onclick="belgeEkleKayda('+not.id+')">📷 Belge Ekle</button>'
+        +'<button class="btn sm ghost" onclick="belgeSonra()">Sonra ekle</button></div></div>')
     +'<div class="row" style="margin-top:12px"><button class="btn sm ghost" onclick="sonKaydiGeriAl('+not.id+')">↩ Geri Al</button></div></div>';
   if(anomali&&anomali.length){const a=anomali[0];
     speak('Dikkat. '+a.kategori+' için '+Math.round(a.tutar).toLocaleString('tr-TR')+' girildi. Kontrol et.','anomali');
   }else sayItems(not.items,[]);
   clearTimeout(otomatikOzet._t);
-  otomatikOzet._t=setTimeout(()=>{ box.style.display='none'; box.innerHTML=''; },9000);
+  // belge beklenirken ekran kendiliğinden kapanmasın
+  if(not.belge)otomatikOzet._t=setTimeout(()=>{ box.style.display='none'; box.innerHTML=''; },9000);
+}
+function belgeSonra(){
+  const box=document.getElementById('confirmBox');
+  box.innerHTML='<div class="card" style="text-align:center">'
+    +'<div class="muted">Kayıt belgesiz olarak işaretlendi.<br>Tablo ekranındaki <b>Belge Bekleyenler</b> bölümünden ekleyebilirsiniz.</div></div>';
+  setTimeout(()=>{box.style.display='none';box.innerHTML='';},2600);
+  renderTable(); renderHomeStats();
 }
 async function sonKaydiGeriAl(id){
   const n=NOTES.find(x=>x.id===id);
@@ -819,13 +834,18 @@ async function confirmAi(){
   }
   const belgeUrl=await uploadDoc(Date.now());
   const yontem=(ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD)||{}).ad||'Nakit';
-  const {anomali}=await kalemleriKaydet(AI_PENDING.items,AI_PENDING.rawText,
+  const {not,anomali}=await kalemleriKaydet(AI_PENDING.items,AI_PENDING.rawText,
     {tip:AI_PENDING.elle?'elle':'ai',yontem,belgeUrl});
   if(anomali.length){const a=anomali[0];
     speak('Dikkat. '+a.kategori+' için '+Math.round(a.tutar).toLocaleString('tr-TR')+' girildi. Kontrol et.','anomali');
   }else sayItems(AI_PENDING.items,[]);
   AI_PENDING=null;
   const box=document.getElementById('confirmBox');
+  if(!belgeUrl){
+    // belge zorunlu değildi ama yine de isteyelim; atlanabilir
+    otomatikOzet(not,[]);
+    return;
+  }
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Kaydedildi</div>';
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2500);
 }
@@ -877,6 +897,65 @@ function kdvAyir(brutTutar,oran){
   const kdv=brutTutar-matrah;
   return {matrah:Math.round(matrah*100)/100, kdv:Math.round(kdv*100)/100, oran:(oran==null?KDV_ORANI:oran)};
 }
+/* ---------- KAYDEDİLMİŞ BİR KAYDA SONRADAN BELGE EKLEME ---------- */
+function belgeEkleKayda(noteId){
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='image/*'; inp.capture='environment';
+  inp.style.display='none';
+  document.body.appendChild(inp);
+  inp.onchange=()=>{
+    const f=inp.files&&inp.files[0];
+    if(!f){ inp.remove(); return; }
+    const r=new FileReader();
+    r.onload=()=>{
+      const img=new Image();
+      img.onload=async ()=>{
+        const mx=1000, sc=Math.min(1,mx/img.width);
+        const c=document.createElement('canvas');
+        c.width=img.width*sc; c.height=img.height*sc;
+        c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+        const dataUrl=c.toDataURL('image/jpeg',0.7);
+        const n=NOTES.find(x=>x.id===noteId);
+        if(n){
+          let url=dataUrl;
+          // bulut varsa depoya yükle, yoksa kaydın içinde tut
+          if(cloudOn&&stg){
+            try{
+              const ref=stg.ref().child('belgeler/'+noteId+'.jpg');
+              await ref.putString(dataUrl,'data_url');
+              url=await ref.getDownloadURL();
+            }catch(e){}
+          }
+          n.belge=url;
+          await Store.set('notes',NOTES);
+          if(cloudOn&&db)try{db.ref('kayitlar/'+noteId+'/belge').set(url);}catch(e){}
+          renderTable(); renderHomeStats();
+          const box=document.getElementById('confirmBox');
+          if(box&&box.style.display!=='none'){
+            box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Belge eklendi</div>';
+            setTimeout(()=>{box.style.display='none';box.innerHTML='';},1800);
+          }
+          speak('Belge eklendi.','kayit');
+        }
+        inp.remove();
+      };
+      img.src=r.result;
+    };
+    r.readAsDataURL(f);
+  };
+  inp.click();
+}
+/* Müdürün belgesiz kayıtları — sonradan tamamlansın diye listelenir */
+function belgesizKayitlarim(){
+  return NOTES.filter(n=>{
+    if(n.belge)return false;
+    if(n.satis)return false;
+    if(!(n.items||[]).some(i=>i.known))return false;
+    if(CURRENT&&CURRENT.rol==='mudur')return n.mudurId===CURRENT.mudurId||!n.mudurId;
+    return true;
+  });
+}
+
 /* belge zorunlu olmayan ama belgesiz kayıtları bulur */
 function belgesizKayitlar(){
   const out=[];
@@ -2608,6 +2687,13 @@ function renderHomeStats(){
     +'<div class="muted" style="font-size:11px">'+escapeHtml(ad)+'</div>'
     +'<div style="font-weight:700;font-size:16px;margin-top:2px">'+money(val)+'</div></div>';
   box.innerHTML=kutu('Bugün',bugunToplam)+kutu(ikinci.ad,ikinci.val);
+  // belgesi eksik kayıtlar için hatırlatma
+  const eksikB=document.getElementById('belgeUyari');
+  if(eksikB){
+    const n=belgesizKayitlarim().length;
+    eksikB.innerHTML=n?('<div class="banner" style="margin:10px 0 0;cursor:pointer" onclick="go(\'notes\')">'
+      +'📷 <b>'+n+' kaydın belgesi eksik.</b> Eklemek için dokunun.</div>'):'';
+  }
 }
 /* Mikrofon teşhisi — cihazda neyin çalışıp neyin çalışmadığını gösterir */
 async function mikrofonTesti(){
@@ -2697,6 +2783,28 @@ function renderBorcAlacak(){
     +'<div class="muted" style="display:flex;justify-content:space-between">'
       +'<span>Alacak '+money(alacak)+'</span><span>Borç '+money(borc)+'</span></div></div>';
 }
+/* ---------- BELGE BEKLEYEN KAYITLAR ---------- */
+function renderBelgeBekleyen(){
+  const list=belgesizKayitlarim();
+  if(!list.length)return '';
+  const satir=n=>{
+    const tutar=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
+    const ad=(n.items||[]).filter(i=>i.known).map(i=>i.known).join(', ')||'Kayıt';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line)">'
+      +'<div style="flex:1"><div style="font-weight:500">'+escapeHtml(ad)+'</div>'
+      +'<div class="muted" style="font-size:12px">'+fmt(n.createdAt).split(' ')[0]
+        +' · '+money(tutar)+(n.odeme?' · '+escapeHtml(n.odeme):'')+'</div></div>'
+      +'<button class="btn sm" style="width:auto" onclick="belgeEkleKayda('+n.id+')">📷 Ekle</button></div>';
+  };
+  return '<div class="card" style="border-color:#e7cf95;background:#fffdf5">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center">'
+      +'<div style="font-weight:600">📷 Belge Bekleyenler</div>'
+      +'<span class="pill" style="color:#a9761e">'+list.length+'</span></div>'
+    +'<div class="muted" style="font-size:12px;margin-top:4px">Fişi/faturası eklenmemiş kayıtlar. Fotoğrafı çekip buradan tamamlayın.</div>'
+    +list.slice(0,20).map(satir).join('')
+    +(list.length>20?'<div class="muted" style="margin-top:8px">İlk 20 kayıt gösteriliyor.</div>':'')
+    +'</div>';
+}
 function renderNotes(){ renderTable(); }
 function renderTable(){
   renderHomeStats();
@@ -2770,6 +2878,7 @@ function renderTable(){
        +'<span>sürüm '+SURUM+'</span>'
        +'<span onclick="guncellemeKontrol()" style="cursor:pointer;text-decoration:underline">güncelle</span></div>'
      +'</div>'
+     +renderBelgeBekleyen()
      +renderBorcAlacak()
      +html;
 
@@ -3501,7 +3610,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · belge tarayıcı';
+const SURUM='2026-07-28 · belge yönlendirme';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
