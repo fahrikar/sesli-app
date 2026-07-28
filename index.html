@@ -420,16 +420,17 @@
     <div class="card">
       <div style="font-weight:600;margin-bottom:2px">Muhasebeciye Gönder</div>
       <div class="muted" style="font-size:12px;margin-bottom:10px">
-        Belgelerden ayıklanan bilgiler tek Excel tablosunda: belge no, firma, VKN,
-        matrah, KDV ve toplam. Fotoğraf gönderilmez.</div>
-      <button class="btn" onclick="muhasebeExcel()">📊 Muhasebe Excel'i İndir</button>
+        Excel dökümü + <b>Resmi Evraklar</b> klasörü. Fatura, irsaliye, makbuz ve
+        dekontlar fotoğrafıyla gider; sıradan fişler yalnızca tabloda yer alır.</div>
+      <button class="btn" onclick="muhasebePaketi()">📦 Muhasebe Paketi (ZIP)</button>
       <div class="row" style="margin-top:8px">
         <button class="btn sm ghost" onclick="tumBelgeleriAyikla()">🔍 Belgeleri Oku</button>
-        <button class="btn sm ghost" onclick="belgeKlasoruIndir()">📁 Fotoğraflar (ZIP)</button>
+        <button class="btn sm ghost" onclick="muhasebeExcel()">📊 Sadece Excel</button>
+        <button class="btn sm ghost" onclick="belgeKlasoruIndir()">📁 Tüm Fotoğraflar</button>
       </div>
       <div class="muted" style="margin-top:8px;font-size:11px">
-        "Belgeleri Oku": taranan fişlerden belge no, firma ve KDV bilgilerini çıkarır.
-        Excel'den önce bir kez çalıştırın.</div>
+        "Belgeleri Oku": fişlerden belge no, firma, VKN ve KDV bilgilerini çıkarır
+        ve evrak türünü belirler. Paketten önce bir kez çalıştırın.</div>
     </div>
     <div id="muhBox"></div>
   </section>
@@ -3633,10 +3634,15 @@ function renderBelgeler(box){
     return;
   }
   const toplam=list.reduce((a,n)=>a+(n.items||[]).reduce((x,y)=>x+(y.known?y.amount:0),0),0);
+  const resmiSayi=list.filter(resmiMi).length;
   box.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between">'
       +'<span>Taranan evrak</span><b>'+list.length+' belge</b></div>'
-      +'<div style="display:flex;justify-content:space-between;padding-top:6px"><span class="muted">Toplam tutar</span>'
-      +'<b>'+money(toplam)+'</b></div>'
+      +'<div style="display:flex;justify-content:space-between;padding-top:6px">'
+        +'<span class="muted">Resmi evrak (muhasebeye gider)</span><b style="color:var(--gold)">'+resmiSayi+'</b></div>'
+      +'<div style="display:flex;justify-content:space-between;padding-top:6px">'
+        +'<span class="muted">Fiş (yalnızca bilgi)</span><b>'+(list.length-resmiSayi)+'</b></div>'
+      +'<div style="display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid var(--line);margin-top:6px">'
+        +'<span class="muted">Toplam tutar</span><b>'+money(toplam)+'</b></div>'
       +(eksik?'<div class="muted" style="margin-top:8px;color:#a9761e">'+eksik+' kaydın belgesi eksik.</div>':'')
       +'</div>'
     +'<div class="card"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px">'
@@ -3644,11 +3650,15 @@ function renderBelgeler(box){
         const kalem=(n.items||[]).filter(i=>i.known).map(i=>i.known).join(', ')||'Belge';
         const tutar=(n.items||[]).reduce((a,b)=>a+(b.known?b.amount:0),0);
         const okundu=n.evrak&&n.evrak.okunanMetin;
+        const resmi=resmiMi(n);
         return '<div style="cursor:pointer;position:relative" onclick="belgeAc('+n.id+')">'
-          +'<img src="'+n.belge+'" loading="lazy" style="width:100%;height:104px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:#fff">'
+          +'<img src="'+n.belge+'" loading="lazy" style="width:100%;height:104px;object-fit:cover;border-radius:12px;'
+            +'border:2px solid '+(resmi?'var(--gold)':'var(--line)')+';background:#fff">'
           +'<div style="position:absolute;top:5px;right:5px;font-size:10px;padding:2px 6px;border-radius:20px;'
-            +'background:'+(okundu?'rgba(47,125,79,.9)':'rgba(169,118,30,.9)')+';color:#fff">'
-            +(okundu?'okundu':'okunmadı')+'</div>'
+            +'background:'+(resmi?'rgba(176,134,63,.92)':'rgba(120,115,106,.85)')+';color:#fff">'
+            +escapeHtml(evrakTuruAdi((n.evrak||{}).tur))+'</div>'
+          +(okundu?'':'<div style="position:absolute;top:5px;left:5px;font-size:10px;padding:2px 6px;border-radius:20px;'
+            +'background:rgba(169,118,30,.9);color:#fff">okunmadı</div>')
           +'<div style="font-size:11px;font-weight:500;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(kalem)+'</div>'
           +'<div class="muted" style="font-size:10px">'+fmt(n.createdAt).split(' ')[0]+' · '+money(tutar)+'</div></div>';
       }).join('')
@@ -3672,6 +3682,11 @@ function belgeAc(id){
     +'<div class="muted" style="font-size:12px;margin-bottom:10px">'+fmt(n.createdAt)+' · '+money(tutar)
       +(n.odeme?' · '+escapeHtml(n.odeme):'')+(n.mudur?' · '+escapeHtml(n.mudur):'')+'</div>'
     +'<div style="font-weight:600;font-size:13px;margin-bottom:2px">Muhasebe Bilgileri</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)">'
+      +'<span class="muted" style="font-size:12px">Evrak Türü</span>'
+      +'<span onclick="evrakTuruDegistir('+n.id+')" style="cursor:pointer;font-weight:600;'
+        +'color:'+(resmiMi(n)?'var(--gold)':'var(--sub)')+'">'
+        +escapeHtml(evrakTuruAdi(e.tur))+(resmiMi(n)?' · muhasebeye gider':' · yalnızca bilgi')+' ✎</span></div>'
     +alan('Belge No','belgeNo',e.belgeNo)
     +alan('Firma','firma',e.firma)
     +alan('VKN/TCKN','vkn',e.vkn)
@@ -3837,7 +3852,49 @@ function evrakAyikla(metin){
   if(out.matrah&&out.kdv&&!acikToplam){
     out.toplam=Math.round((out.matrah+out.kdv)*100)/100;
   }
+  out.tur=evrakTuruBul(tam,out);
   return out;
+}
+/* Resmi evrak mı, sıradan fiş mi?
+   Muhasebeye yalnızca resmi olanların fotoğrafı gönderilir. */
+function evrakTuruBul(tam,e){
+  if(/e-?ar[sş]iv|e-?fatura|\bfatura\b/.test(tam))return 'fatura';
+  if(/irsaliye/.test(tam))return 'irsaliye';
+  if(/serbest\s*meslek|makbuz|gider\s*pusulas/.test(tam))return 'makbuz';
+  if(/dekont|havale|eft\b|hesap\s*[oö]zeti/.test(tam))return 'dekont';
+  if(/fi[sş]\b|yazar\s*kasa|yazarkasa/.test(tam))return 'fis';
+  // Metin okunmadıysa: VKN + belge no varsa resmi kabul edilir
+  if(e&&e.vkn&&e.belgeNo)return 'fatura';
+  return 'diger';
+}
+const EVRAK_TURLERI={
+  fatura:{ad:'Fatura',resmi:true},
+  irsaliye:{ad:'İrsaliye',resmi:true},
+  makbuz:{ad:'Makbuz',resmi:true},
+  dekont:{ad:'Dekont',resmi:true},
+  fis:{ad:'Fiş',resmi:false},
+  diger:{ad:'Diğer',resmi:false}
+};
+function evrakTuruAdi(t){return (EVRAK_TURLERI[t]||EVRAK_TURLERI.diger).ad;}
+function resmiMi(n){
+  const t=(n.evrak&&n.evrak.tur)||'diger';
+  return (EVRAK_TURLERI[t]||EVRAK_TURLERI.diger).resmi;
+}
+/* Kullanıcı türü elle değiştirebilir — OCR yanılırsa muhasebeye
+   yanlış evrak gitmesin diye son söz kullanıcıda. */
+async function evrakTuruDegistir(noteId){
+  const n=NOTES.find(x=>x.id===noteId); if(!n)return;
+  const anahtarlar=Object.keys(EVRAK_TURLERI);
+  const liste=anahtarlar.map((k,i)=>(i+1)+') '+EVRAK_TURLERI[k].ad+(EVRAK_TURLERI[k].resmi?' (resmi)':'')).join('\n');
+  const s=prompt('Belge türü:\n\n'+liste,'');
+  if(s===null)return;
+  const i=parseInt(s.trim(),10)-1;
+  if(!(i>=0&&i<anahtarlar.length)){alert('Geçersiz seçim.');return;}
+  n.evrak=n.evrak||{}; n.evrak.tur=anahtarlar[i];
+  await Store.set('notes',NOTES); await syncNote(noteId);
+  renderMuhasebe();
+  const box=document.getElementById('confirmBox');
+  if(box&&box.style.display!=='none')belgeAc(noteId);
 }
 /* Bir kaydın belgesini okuyup bilgileri kaydın üzerine işler */
 async function belgeBilgiAyikla(noteId,sessiz){
@@ -3920,7 +3977,49 @@ function dataUrlToBytes(u){
   for(let k=0;k<b.length;k++)a[k]=b.charCodeAt(k);
   return a;
 }
-/* Muhasebeciye tek dosya: tüm evrak fotoğrafları + döküm listesi */
+/* ---------- MUHASEBECİ PAKETİ ----------
+   Tek ZIP: bilgi tablosu (Excel) + yalnızca RESMİ evrakların fotoğrafı.
+   Sıradan fişler fotoğraf olarak gönderilmez; bilgileri tabloda yer alır. */
+async function muhasebePaketi(){
+  const hepsi=benimKayitlarim().filter(n=>(n.items||[]).some(i=>i.known));
+  if(!hepsi.length){alert('Aktarılacak kayıt yok.');return;}
+  const resmiler=hepsi.filter(n=>n.belge&&resmiMi(n));
+  const box=document.getElementById('muhBox');
+  const eski=box.innerHTML;
+  const dosyalar=[];
+
+  // 1) Excel tablosu — tüm kayıtlar
+  const wb=muhasebeWorkbook(hepsi);
+  try{
+    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+    dosyalar.push({ad:'00_Muhasebe_Dokumu.xlsx',veri:new Uint8Array(wbout)});
+  }catch(e){ alert('Excel oluşturulamadı: '+e.message); return; }
+
+  // 2) Yalnızca resmi evrakların fotoğrafı
+  for(let i=0;i<resmiler.length;i++){
+    const n=resmiler[i];
+    box.innerHTML='<div class="card" style="text-align:center">Resmi evraklar paketleniyor… <b>'+(i+1)+'/'+resmiler.length+'</b></div>'+eski;
+    try{
+      let veri;
+      if(/^data:/.test(n.belge))veri=dataUrlToBytes(n.belge);
+      else{ const res=await fetch(n.belge); veri=new Uint8Array(await res.arrayBuffer()); }
+      const tur=evrakTuruAdi((n.evrak||{}).tur);
+      dosyalar.push({ad:'Resmi Evraklar/'+tur+'_'+belgeDosyaAdi(n),veri});
+    }catch(e){}
+  }
+  const blob=zipOlustur(dosyalar);
+  const kim=(CURRENT&&CURRENT.rol!=='patron')?('_'+CURRENT.ad):'';
+  dl(blob,'Muhasebe'+kim+'_'+todayStr()+'.zip');
+  box.innerHTML=eski; renderMuhasebe();
+  const fisSayi=hepsi.filter(n=>n.belge&&!resmiMi(n)).length;
+  alert('✓ Muhasebe paketi hazır.\n\n'
+    +'• Excel dökümü: '+hepsi.length+' kayıt\n'
+    +'• Resmi Evraklar klasörü: '+resmiler.length+' belge\n'
+    +(fisSayi?('• '+fisSayi+' fiş fotoğraf olarak eklenmedi, bilgileri tabloda var.\n'):'')
+    +'\nWhatsApp veya e-posta ile gönderebilirsiniz.');
+}
+
+/* Tüm fotoğrafları içeren arşiv — kendi kayıtlarınız için */
 async function belgeKlasoruIndir(){
   const list=belgeliKayitlar();
   if(!list.length){alert('Taranmış evrak yok.');return;}
@@ -3976,6 +4075,11 @@ async function belgeKlasoruIndir(){
 function muhasebeExcel(){
   const list=benimKayitlarim().filter(n=>(n.items||[]).some(i=>i.known));
   if(!list.length){alert('Aktarılacak kayıt yok.');return;}
+  const kim=(CURRENT&&CURRENT.rol!=='patron')?('_'+CURRENT.ad):'';
+  writeWorkbook(muhasebeWorkbook(list),'Muhasebe'+kim+'_'+todayStr()+'.xlsx');
+}
+/* Excel içeriği — hem tek başına indirmede hem paket içinde kullanılır */
+function muhasebeWorkbook(list){
   const satirlar=[];
   list.forEach(n=>{
     const e=n.evrak||{};
@@ -3985,8 +4089,10 @@ function muhasebeExcel(){
     const h=kdvAyir(brut,oran);
     const matrah=(e.matrah!=null?e.matrah:h.matrah);
     const kdv=(e.kdv!=null?e.kdv:h.kdv);
+    const resmi=n.belge&&resmiMi(n);
     satirlar.push({
       'Tarih':(e.tarih?fmtDate(e.tarih):fmt(n.createdAt).split(' ')[0]),
+      'Evrak Türü':evrakTuruAdi(e.tur),
       'Belge No':e.belgeNo||'',
       'Firma':e.firma||'',
       'VKN/TCKN':e.vkn||'',
@@ -3998,18 +4104,20 @@ function muhasebeExcel(){
       'Brüt Toplam':brut,
       'Ödeme':n.odeme||'',
       'Kaydeden':n.mudur||'',
-      'Belge':n.belge?(e.okunanMetin?'okundu':'var, okunmadı'):'YOK'
+      // Fotoğrafı pakete giren evraklar burada işaretlenir
+      'Ekli Dosya':resmi?('Resmi Evraklar/'+evrakTuruAdi(e.tur)+'_'+belgeDosyaAdi(n)):(n.belge?'(fiş — yalnızca bilgi)':'BELGE YOK')
     });
   });
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.json_to_sheet(satirlar);
-  ws['!cols']=[{wch:11},{wch:18},{wch:26},{wch:13},{wch:15},{wch:24},
-               {wch:13},{wch:10},{wch:12},{wch:13},{wch:15},{wch:11},{wch:14}];
+  ws['!cols']=[{wch:11},{wch:12},{wch:18},{wch:26},{wch:13},{wch:15},{wch:24},
+               {wch:13},{wch:10},{wch:12},{wch:13},{wch:15},{wch:11},{wch:42}];
   // para ve yüzde biçimleri
   const R=satirlar.length;
   for(let i=2;i<=R+1;i++){
-    ['G','I','J'].forEach(c=>{ if(ws[c+i])ws[c+i].z='#,##0.00'; });
-    if(ws['H'+i])ws['H'+i].z='0%';
+    // Evrak Türü sütunu eklenince para/yüzde sütunları bir sağa kaydı
+    ['H','J','K'].forEach(c=>{ if(ws[c+i])ws[c+i].z='#,##0.00'; });
+    if(ws['I'+i])ws['I'+i].z='0%';
   }
   XLSX.utils.book_append_sheet(wb,ws,'Evrak Dökümü');
 
@@ -4027,9 +4135,7 @@ function muhasebeExcel(){
   const ws2=XLSX.utils.json_to_sheet(ozet);
   ws2['!cols']=[{wch:12},{wch:13},{wch:15},{wch:15},{wch:15}];
   XLSX.utils.book_append_sheet(wb,ws2,'KDV Özeti');
-
-  const kim=(CURRENT&&CURRENT.rol!=='patron')?('_'+CURRENT.ad):'';
-  writeWorkbook(wb,'Muhasebe'+kim+'_'+todayStr()+'.xlsx');
+  return wb;          // indirme çağıran tarafta yapılır (tek başına ya da paket içinde)
 }
 
 function muhasebeciPaketi(){
@@ -4139,7 +4245,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · muhasebe tablosu';
+const SURUM='2026-07-28 · resmi evraklar';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
