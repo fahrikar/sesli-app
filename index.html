@@ -173,6 +173,15 @@
     <div id="siteList"></div>
   </section>
 
+  <!-- ŞANTİYE DETAYI (patron: yalnızca görüntüleme) -->
+  <section class="screen" id="siteDetail">
+    <div style="display:flex;align-items:center;gap:10px;margin:4px 0 14px">
+      <button class="btn sm ghost" style="width:auto" onclick="go('sites')">‹ Geri</button>
+      <h2 id="sdBaslik" style="margin:0;font-size:20px;flex:1"></h2>
+    </div>
+    <div id="sdIcerik"></div>
+  </section>
+
   <!-- FABRIKA -->
   <section class="screen" id="fabScreen">
     <h2>Fabrika</h2>
@@ -1033,7 +1042,11 @@ async function siteKalemDuzenle(){
 }
 function siteTotals(siteId){
   let t=0,c=0;
-  NOTES.forEach(n=>{ if(n.siteId===siteId)(n.items||[]).forEach(it=>{if(it.known){t+=it.amount;c++;}}); });
+  NOTES.forEach(n=>{ if(n.siteId===siteId)(n.items||[]).forEach(it=>{
+    if(!it.known)return;
+    if(it.grup==='Borç/Alacak')return;   // borç/alacak gider toplamına girmez
+    t+=it.amount; c++;
+  }); });
   return {toplam:t,adet:c};
 }
 function renderSites(){
@@ -1056,9 +1069,11 @@ function renderSites(){
     return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">'
       +'<div style="flex:1" onclick="openSite(\''+s.id+'\')"><div style="font-weight:600;font-size:16px">'+escapeHtml(s.ad)+'</div>'
       +'<div class="muted">'+t.adet+' kayıt · '+money(t.toplam)+'</div></div>'
-      +'<button class="btn sm green" onclick="openSite(\''+s.id+'\')">Aç</button></div>'
-      +'<div class="row" style="margin-top:10px"><button class="btn sm ghost" onclick="renameSite(\''+s.id+'\')">Adı Değiştir</button>'
-      +'<button class="btn sm ghost" onclick="delSite(\''+s.id+'\')">Sil</button></div></div>';
+      +'<button class="btn sm '+(patron?'':'green')+'" onclick="openSite(\''+s.id+'\')">'+(patron?'Görüntüle':'Aç')+'</button></div>'
+      // şantiyeyi müdür yönetir; patron yalnızca görüntüler
+      +(patron?'':'<div class="row" style="margin-top:10px"><button class="btn sm ghost" onclick="renameSite(\''+s.id+'\')">Adı Değiştir</button>'
+        +'<button class="btn sm ghost" onclick="delSite(\''+s.id+'\')">Sil</button></div>')
+      +'</div>';
   };
 
   if(patron){
@@ -1081,7 +1096,81 @@ function manageKalemler(){
 }
 function openSite(id){
   AKTIF_SANTIYE=id;
+  // Patron veri girmez; şantiyeyi yalnızca görüntüler
+  if(CURRENT&&CURRENT.rol==='patron'){ go('siteDetail'); return; }
   go('home');
+}
+
+/* ---------- ŞANTİYE DETAYI (salt okunur) ---------- */
+function santiyeOzet(siteId){
+  const gider=[], gelir=[];
+  NOTES.forEach(n=>{
+    if(n.siteId!==siteId)return;
+    (n.items||[]).forEach(it=>{
+      if(!it.known)return;
+      if(it.grup==='Borç/Alacak')return;              // gider/gelir değil
+      const kayit=Object.assign({},it,{createdAt:n.createdAt,mudur:n.mudur||'',odeme:n.odeme||'',belge:!!n.belge});
+      (it.grup==='Gelir'?gelir:gider).push(kayit);
+    });
+  });
+  return {gider,gelir,
+    giderToplam:gider.reduce((a,b)=>a+b.amount,0),
+    gelirToplam:gelir.reduce((a,b)=>a+b.amount,0)};
+}
+function renderSiteDetail(){
+  const s=SITES.find(x=>x.id===AKTIF_SANTIYE);
+  const bas=document.getElementById('sdBaslik'), box=document.getElementById('sdIcerik');
+  if(!bas||!box)return;
+  bas.textContent=s?s.ad:'Şantiye';
+  if(!s){box.innerHTML='<div class="empty">Şantiye bulunamadı.</div>';return;}
+  const o=santiyeOzet(s.id);
+  const net=o.gelirToplam-o.giderToplam;
+
+  let html='<div class="card">'
+    +'<div style="display:flex;justify-content:space-between;padding:6px 0"><span>Toplam Gider</span>'
+      +'<b style="color:var(--danger)">'+money(o.giderToplam)+'</b></div>'
+    +(o.gelirToplam?'<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line)"><span>Toplam Gelir</span>'
+      +'<b style="color:var(--ok)">'+money(o.gelirToplam)+'</b></div>'
+      +'<div style="display:flex;justify-content:space-between;padding:8px 0 0;border-top:1px solid var(--line);font-weight:700"><span>Net</span>'
+      +'<span style="color:'+(net<0?'var(--danger)':'var(--ok)')+'">'+money(net)+'</span></div>':'')
+    +'<div class="muted" style="margin-top:8px">'+(o.gider.length+o.gelir.length)+' kalem · '
+      +escapeHtml(mudurAdi(s.mudurId))+'</div></div>';
+
+  // kategori dökümü
+  const grupla=list=>{
+    const g={};
+    list.forEach(i=>{ const k=i.known; (g[k]=g[k]||{ad:k,adet:0,toplam:0})
+      .adet++, g[k].toplam+=i.amount; });
+    return Object.values(g).sort((a,b)=>b.toplam-a.toplam);
+  };
+  const dokum=(baslik,list,renk)=>{
+    if(!list.length)return '';
+    return '<div class="card"><div style="font-weight:600;margin-bottom:4px">'+baslik+'</div>'
+      +grupla(list).map(g=>'<div style="display:flex;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line)">'
+        +'<div><div style="font-weight:500">'+escapeHtml(g.ad)+'</div>'
+        +'<div class="muted" style="font-size:12px">'+g.adet+' kayıt</div></div>'
+        +'<b style="color:'+renk+'">'+money(g.toplam)+'</b></div>').join('')
+      +'</div>';
+  };
+  html+=dokum('Giderler',o.gider,'var(--danger)');
+  html+=dokum('Gelirler',o.gelir,'var(--ok)');
+
+  // son hareketler
+  const hepsi=o.gider.concat(o.gelir).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  if(hepsi.length){
+    html+='<div class="card"><div style="font-weight:600;margin-bottom:4px">Son Hareketler</div>'
+      +hepsi.slice(0,30).map(i=>'<div style="display:flex;justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid var(--line)">'
+        +'<div style="flex:1"><div style="font-weight:500">'+escapeHtml(i.known)+'</div>'
+        +'<div class="muted" style="font-size:12px">'+fmt(i.createdAt).split(' ')[0]
+        +(i.mudur?' · '+escapeHtml(i.mudur):'')+(i.odeme?' · '+escapeHtml(i.odeme):'')
+        +(i.belge?' · 📎':'')+'</div></div>'
+        +'<b style="white-space:nowrap;color:'+(i.grup==='Gelir'?'var(--ok)':'var(--ink)')+'">'+money(i.amount)+'</b></div>').join('')
+      +(hepsi.length>30?'<div class="muted" style="margin-top:8px">İlk 30 hareket gösteriliyor.</div>':'')
+      +'</div>';
+  }else{
+    html+='<div class="empty">Bu şantiyede henüz kayıt yok.</div>';
+  }
+  box.innerHTML=html;
 }
 
 /* ============================================================
@@ -1213,7 +1302,7 @@ const Store={
 let NOTES=[], PAYMENTS=[];
 
 /* ---------- navigation ---------- */
-const titles={sites:'Şantiyeler',fabrika:'Fabrika',home:'Gider Girişi',voice:'Sesli Komut',camera:'Kamera',notes:'Tablo',reports:'Rapor',stock:'Stok Takibi',muhasebe:'Muhasebe',payments:'Çek Ödemeleri'};
+const titles={sites:'Şantiyeler',siteDetail:'Şantiye',fabrika:'Fabrika',home:'Gider Girişi',voice:'Sesli Komut',camera:'Kamera',notes:'Tablo',reports:'Rapor',stock:'Stok Takibi',muhasebe:'Muhasebe',payments:'Çek Ödemeleri'};
 function go(id){
   const secId=(id==='sites')?'siteScreen':(id==='fabrika')?'fabScreen':id;
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -1221,9 +1310,10 @@ function go(id){
   document.getElementById('hdrTitle').textContent=titles[id]||'Kayıt';
   if(id==='home'){const sn=document.getElementById('aktifSantiye'); if(sn){const st=SITES.find(x=>x.id===AKTIF_SANTIYE);sn.textContent=st?st.ad:'Şantiye seçilmedi';} renderHomeStats();}
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
-  const map={sites:'nSites',home:'nHome',notes:'nNotes',reports:'nReports',stock:'nStock',muhasebe:'nMuh',payments:'nPayments'};
+  const map={sites:'nSites',siteDetail:'nSites',home:'nHome',notes:'nNotes',reports:'nReports',stock:'nStock',muhasebe:'nMuh',payments:'nPayments'};
   if(map[id])document.getElementById(map[id]).classList.add('on');
   if(id==='sites')renderSites();
+  if(id==='siteDetail')renderSiteDetail();
   if(id==='fabrika')renderFabrika();
   if(id==='notes')renderNotes();
   if(id==='reports')report(curReport);
@@ -3049,7 +3139,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · otomatik kayıt';
+const SURUM='2026-07-28 · şantiye görünümü';
 
 /* Service worker: uygulama gibi kurulsun, internet yokken de açılsın ve
    GÜNCELLEMELER KENDİLİĞİNDEN İNSİN (silip yeniden kurmaya gerek kalmadan). */
