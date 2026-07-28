@@ -418,6 +418,16 @@ const ODEME_YONTEMLERI=[
   {k:'cek',     ad:'Çek',            belge:true, belgeAd:'Çek görüntüsü'},
   {k:'kredi',   ad:'Kredi Kartı',    belge:true, belgeAd:'Kredi kartı slipi'}
 ];
+/* Cümlede ödeme yöntemi geçiyor mu? ("havale ile ödedim", "çekle verdim") */
+function odemeYontemiTespit(text){
+  const t=trLower(text||'');
+  if(/(havale|eft|banka|hesaba|ibana|yatırdım|yatirdim)/.test(t))return 'havale';
+  if(/(çek(le|i|ini)?\b|cek(le|i)?\b)/.test(t))return 'cek';
+  if(/(kredi kart|kartla|karttan|kart ile|pos)/.test(t))return 'kredi';
+  if(/(nakit|elden|peşin|pesin)/.test(t))return 'nakit';
+  return null;
+}
+
 /* Bu kategorilere yapılan ödemelerde belge, patron dahil herkes için zorunludur */
 function belgeZorunluKategori(ad){
   return SANTIYE_KATEGORILERI.some(k=>trLower(k)===trLower(ad||''));
@@ -559,22 +569,82 @@ Cümle: "${cumle}"`;
 
 /* AI onay ekranı */
 let AI_PENDING=null;
+
+/* Konuşulan cümle onaysız kaydedilebilir mi?
+   Kaydedilemeyecek haller onay ekranına düşer:
+   - tanınmayan kalem var (yanlış klasöre atmayalım)
+   - ödeme yöntemi belge gerektiriyor (dekont/çek görüntüsü/slip eklenmeli) */
+function otomatikKaydedilebilir(items,txt){
+  if(SETTINGS.otomatik===false)return false;
+  if(!items.length)return false;
+  if(items.some(i=>!i.known))return false;
+  const y=odemeYontemiTespit(txt)||'nakit';
+  const eski=PENDING_METHOD; PENDING_METHOD=y;
+  const belgeLazim=belgeGerekliMi(items);
+  PENDING_METHOD=eski;
+  return !belgeLazim;
+}
+async function sonucuIsle(items,txt,fallback){
+  if(otomatikKaydedilebilir(items,txt)){
+    const y=odemeYontemiTespit(txt)||'nakit';
+    const yontem=(ODEME_YONTEMLERI.find(x=>x.k===y)||{}).ad||'Nakit';
+    const {not,anomali}=await kalemleriKaydet(items,txt,{tip:'ai',yontem});
+    otomatikOzet(not,anomali);
+    return;
+  }
+  showAiConfirm(items,txt,fallback);
+}
 async function processWithAI(txt){
   const lb=document.getElementById('liveBox');
-  // AI kurulu değilse: cümleyi yerel çözümleyiciyle ayrıştır, onaya sun
+  // AI kurulu değilse: cümleyi yerel çözümleyiciyle ayrıştır
   if(!aiHazir()){
-    showAiConfirm(parseItems(txt),txt,'yerel');
+    await sonucuIsle(parseItems(txt),txt,'yerel');
     return;
   }
   if(lb){lb.style.display='block';lb.innerHTML='<div class="muted" style="padding:12px">Yapay zekâ cümleyi çözümlüyor…</div>';}
   try{
     const items=await aiParse(txt);
     if(lb){lb.style.display='none';lb.innerHTML='';}
-    showAiConfirm(items,txt);
+    await sonucuIsle(items,txt);
   }catch(e){
     if(lb){lb.style.display='none';lb.innerHTML='';}
-    showAiConfirm(parseItems(txt),txt,'hata');
+    await sonucuIsle(parseItems(txt),txt,'hata');
   }
+}
+
+/* Otomatik kayıt sonrası: nereye gittiğini göster + geri alma imkânı */
+function otomatikOzet(not,anomali){
+  const box=document.getElementById('confirmBox');
+  if(!box)return;
+  box.style.display='block';
+  box.innerHTML='<div class="card" style="text-align:left">'
+    +'<div style="font-weight:600;color:var(--ok);margin-bottom:8px">✓ Kaydedildi</div>'
+    +not.items.map(i=>'<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line)">'
+        +'<div><div style="font-weight:500">'+escapeHtml(i.known)+'</div>'
+        +'<div class="muted" style="font-size:12px">'+escapeHtml(i.grup||'')
+        +(i.kisi?' · '+escapeHtml(i.kisi):'')+(i.odemeGunu?' · vade '+fmtDate(i.odemeGunu):'')+'</div></div>'
+        +'<b style="white-space:nowrap">'+money(i.amount)+'</b></div>').join('')
+    +'<div class="muted" style="margin-top:8px;font-size:12px">'+escapeHtml(not.odeme)+'</div>'
+    +'<div class="row" style="margin-top:12px"><button class="btn sm ghost" onclick="sonKaydiGeriAl('+not.id+')">↩ Geri Al</button></div></div>';
+  if(anomali&&anomali.length){const a=anomali[0];
+    speak('Dikkat. '+a.kategori+' için '+Math.round(a.tutar).toLocaleString('tr-TR')+' girildi. Kontrol et.','anomali');
+  }else sayItems(not.items,[]);
+  clearTimeout(otomatikOzet._t);
+  otomatikOzet._t=setTimeout(()=>{ box.style.display='none'; box.innerHTML=''; },9000);
+}
+async function sonKaydiGeriAl(id){
+  const n=NOTES.find(x=>x.id===id);
+  NOTES=NOTES.filter(x=>x.id!==id);
+  if(n)(n.items||[]).forEach(it=>{
+    if(it.odemeGunu)PAYMENTS=PAYMENTS.filter(p=>!(p.dueDate===it.odemeGunu&&payAmountNum(p)===it.amount));
+  });
+  await Store.set('notes',NOTES); await Store.set('payments',PAYMENTS);
+  if(cloudOn&&db)try{db.ref('kayitlar/'+id).remove();}catch(e){}
+  renderTable();
+  const box=document.getElementById('confirmBox');
+  box.innerHTML='<div class="card" style="text-align:center">Kayıt geri alındı</div>';
+  speak('Kayıt geri alındı.','kayit');
+  setTimeout(()=>{box.style.display='none';box.innerHTML='';},2000);
 }
 function showAiConfirm(items,rawText,fallback,elle){
   const box=document.getElementById('confirmBox');
@@ -613,6 +683,31 @@ function showAiConfirm(items,rawText,fallback,elle){
   speak('Şunu anladım: '+ozet+'.'+(tanimsizSayi?' '+tanimsizSayi+' kalem tanımsız.':'')+' Onaylıyor musun?','kayit');
   sesleOnayDinle(()=>confirmAi(), ()=>cancelAi());
 }
+/* Kaydetme çekirdeği — hem onaylı hem otomatik yol bunu kullanır */
+async function kalemleriKaydet(items,rawText,opt){
+  opt=opt||{};
+  const noteId=Date.now();
+  const anomali=checkAnomalies(items,noteId);
+  const yeni={id:noteId,type:opt.tip||'ai',text:rawText,items,
+    odeme:opt.yontem||'Nakit',belge:opt.belgeUrl||null,
+    fabrika:(CURRENT&&CURRENT.rol==='fabrika'),mudurId:CURRENT?CURRENT.mudurId:null,
+    kdvOran:(opt.kdv!=null?opt.kdv:PENDING_KDV),
+    siteId:AKTIF_SANTIYE,createdAt:new Date().toISOString()};
+  NOTES.unshift(yeni); await Store.set('notes',NOTES); pushCloudNote(yeni);
+  // vadesi olanlar hatırlatma takvimine
+  items.forEach(it=>{
+    if(it.odemeGunu){
+      PAYMENTS.push({id:Date.now()+Math.random(),title:(it.kisi?it.kisi+' - ':'')+it.category,
+        amount:money(it.amount),dueDate:it.odemeGunu});
+    }
+  });
+  PAYMENTS.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  await Store.set('payments',PAYMENTS);
+  renderTable();
+  if(typeof renderFabrika==='function'&&CURRENT&&CURRENT.rol==='fabrika')renderFabrika();
+  return {not:yeni,anomali};
+}
+
 async function confirmAi(){
   onayDinlemeDur();
   if(!AI_PENDING)return;
@@ -622,29 +717,14 @@ async function confirmAi(){
     speak('Belge gerekli. Lütfen '+(o.belgeAd||'belge')+' ekle.','kayit');
     return;
   }
-  const noteId=Date.now();
-  const belgeUrl=await uploadDoc(noteId);
+  const belgeUrl=await uploadDoc(Date.now());
   const yontem=(ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD)||{}).ad||'Nakit';
-  const anomali=checkAnomalies(AI_PENDING.items,noteId);
-  const yeni={id:noteId,type:AI_PENDING.elle?'elle':'ai',text:AI_PENDING.rawText,items:AI_PENDING.items,
-    odeme:yontem,belge:belgeUrl||null,
-    fabrika:(CURRENT&&CURRENT.rol==='fabrika'),mudurId:CURRENT?CURRENT.mudurId:null,
-    kdvOran:PENDING_KDV,
-    siteId:AKTIF_SANTIYE,createdAt:new Date().toISOString()};
-  NOTES.unshift(yeni); await Store.set('notes',NOTES); pushCloudNote(yeni);
-  // ödeme günü olanları çek hatırlatmasına ekle
-  AI_PENDING.items.forEach(it=>{
-    if(it.odemeGunu){
-      PAYMENTS.push({id:Date.now()+Math.random(),title:(it.kisi?it.kisi+' - ':'')+it.category,
-        amount:money(it.amount),dueDate:it.odemeGunu});
-    }
-  });
-  PAYMENTS.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
-  await Store.set('payments',PAYMENTS);
+  const {anomali}=await kalemleriKaydet(AI_PENDING.items,AI_PENDING.rawText,
+    {tip:AI_PENDING.elle?'elle':'ai',yontem,belgeUrl});
   if(anomali.length){const a=anomali[0];
     speak('Dikkat. '+a.kategori+' için '+Math.round(a.tutar).toLocaleString('tr-TR')+' girildi. Kontrol et.','anomali');
   }else sayItems(AI_PENDING.items,[]);
-  AI_PENDING=null; renderTable(); if(typeof renderFabrika==='function'&&CURRENT&&CURRENT.rol==='fabrika')renderFabrika();
+  AI_PENDING=null;
   const box=document.getElementById('confirmBox');
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Kaydedildi</div>';
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2500);
@@ -1647,7 +1727,7 @@ function fuzzyHas(text,key){
 
 /* ---------- ÖĞRENEN SÖZLÜK ---------- */
 let LEXICON=[];           // {kelime, kategori}
-const SES_VARSAYILAN={kayit:true,stok:true,anomali:true,ogrenme:true};
+const SES_VARSAYILAN={kayit:true,stok:true,anomali:true,ogrenme:true,otomatik:true};
 let SETTINGS=Object.assign({},SES_VARSAYILAN);
 
 function learnedMatch(text){
@@ -1722,7 +1802,8 @@ async function toggleSes(tip){
   if(SETTINGS[tip])speak('Açık',tip);
 }
 async function tumSes(ac){
-  Object.keys(SES_VARSAYILAN).forEach(k=>SETTINGS[k]=ac);
+  // yalnızca sesli uyarılar; "otomatik kayıt" ayrı bir ayardır
+  ['kayit','stok','anomali','ogrenme'].forEach(k=>SETTINGS[k]=ac);
   await Store.set('settings',SETTINGS);
   renderTable();
 }
@@ -2210,7 +2291,14 @@ function renderTable(){
     {k:'ogrenme', ad:'Öğrenme teyidi',  aciklama:'Yeni kelime öğretince'}
   ];
   const acikSayi=sesler.filter(x=>SETTINGS[x.k]!==false).length;
-  html='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+  const oto=SETTINGS.otomatik!==false;
+  html='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
+     +'<div style="flex:1"><div style="font-weight:600">Otomatik kayıt</div>'
+     +'<div class="muted" style="font-size:12px">Açıkken konuştuğunuz kalemler onay beklemeden ilgili kategoriye yazılır. '
+     +'Tanınmayan kalem varsa ya da dekont/çek/slip gerekiyorsa yine onay ekranı çıkar.</div></div>'
+     +'<button class="btn sm '+(oto?'':'ghost')+'" onclick="toggleSes(\'otomatik\')">'+(oto?'Açık':'Kapalı')+'</button>'
+     +'</div></div>'
+     +'<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
      +'<div style="font-weight:600">Sesli uyarılar</div>'
      +'<div class="row"><button class="btn sm ghost" onclick="tumSes(true)">Hepsi açık</button>'
      +'<button class="btn sm ghost" onclick="tumSes(false)">Hepsi kapalı</button></div></div>'
@@ -2961,7 +3049,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · iPhone dikte';
+const SURUM='2026-07-28 · otomatik kayıt';
 
 /* Service worker: uygulama gibi kurulsun, internet yokken de açılsın ve
    GÜNCELLEMELER KENDİLİĞİNDEN İNSİN (silip yeniden kurmaya gerek kalmadan). */
