@@ -2,8 +2,21 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Sesli & Görsel Kayıt</title>
+
+<!-- Uygulama olarak kurulum (Android/Samsung: Chrome rozeti olmadan açılır) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1d1d1f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="Sesli Kayıt">
+<!-- iOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sesli Kayıt">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -2878,7 +2891,30 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · borç/alacak';
+const SURUM='2026-07-28 · uygulama kurulumu';
+
+/* Service worker: uygulama gibi kurulabilsin ve internet yokken de açılsın.
+   Strateji önce-ağ olduğu için güncellemeler takılı kalmaz. */
+if('serviceWorker'in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').then(reg=>{
+      // yeni sürüm indiyse bir sonraki açılışta değil, hemen devreye girsin
+      reg.addEventListener('updatefound',()=>{
+        const yeni=reg.installing;
+        if(!yeni)return;
+        yeni.addEventListener('statechange',()=>{
+          if(yeni.state==='installed'&&navigator.serviceWorker.controller){
+            yeni.postMessage('guncelle');
+          }
+        });
+      });
+    }).catch(()=>{});
+    let yenilendi=false;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      if(yenilendi)return; yenilendi=true; location.reload();
+    });
+  });
+}
 /* ---------- init ---------- */
 (async function(){
   initFirebase();
