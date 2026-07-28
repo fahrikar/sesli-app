@@ -1153,28 +1153,50 @@ function go(id){
   if(id==='camera')startCam();
 }
 
-/* ---------- SESLİ KOMUT (STT) ---------- */
-let recog=null, listening=false;
+/* ---------- SESLİ KOMUT (STT) ----------
+   ÖNEMLİ: Durum mesajları hem "Sesli Komut" ekranına hem de ANA EKRANA yazılır.
+   Mikrofon ana ekranda olduğu için, mesaj yalnızca gizli ekrana yazılırsa
+   kullanıcı hiçbir şey olmuyor sanıyor. */
+let recog=null, listening=false, sonHata='';
+function sesDurum(mesaj,tur){
+  const st=document.getElementById('voiceStatus');
+  if(st)st.innerHTML=mesaj;
+  const lb=document.getElementById('liveBox');
+  if(lb){
+    if(!mesaj){ lb.style.display='none'; lb.innerHTML=''; return; }
+    const renk=tur==='hata'?'#b23b34':tur==='uyari'?'#a9761e':'var(--ink)';
+    lb.style.display='block';
+    lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;'
+      +'padding:10px 12px;font-size:13px;text-align:left;line-height:1.45;color:'+renk+'">'+mesaj+'</div>';
+  }
+}
+const SES_HATALARI={
+  'not-allowed':'⚠️ <b>Mikrofon izni yok.</b><br>Chrome → adres çubuğundaki kilit → İzinler → Mikrofon → <b>İzin ver</b>. Uygulama olarak kurduysanız: Telefon Ayarları → Uygulamalar → Chrome → İzinler → Mikrofon.',
+  'service-not-allowed':'⚠️ <b>Mikrofon izni engellenmiş.</b><br>Telefon Ayarları → Uygulamalar → Chrome → İzinler → Mikrofon → İzin ver.',
+  'network':'⚠️ <b>İnternet gerekiyor.</b><br>Konuşmayı yazıya çevirme Google sunucusunda yapılıyor. Şantiyede çekmiyorsa <b>✎ Elle Ekle</b> ile girebilirsiniz.',
+  'no-speech':'Ses alınamadı. Mikrofona biraz daha yakın ve <b>bırakmadan önce</b> konuşun.',
+  'audio-capture':'⚠️ <b>Mikrofona ulaşılamadı.</b><br>Başka bir uygulama mikrofonu kullanıyor olabilir; onu kapatıp tekrar deneyin.',
+  'language-not-supported':'⚠️ Türkçe ses tanıma bu cihazda yok. Chrome ve Google uygulamasını güncelleyin.'
+};
 async function startVoice(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const st=document.getElementById('voiceStatus');
+  sonHata='';
   const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-  if(!SR){ st.innerHTML=isIOS?'⚠️ iPhone/iPad tarayıcısı canlı ses tanımayı desteklemiyor. Android Chrome ya da bilgisayarda Chrome kullan.':'⚠️ Bu tarayıcı ses tanımayı desteklemiyor. Chrome ile açmayı dene.'; return; }
-  if(!window.isSecureContext){ st.textContent='⚠️ Mikrofon yalnızca güvenli bağlantıda (https) çalışır. Sayfayı https adresinden aç.'; return; }
+  if(!SR){ sesDurum(isIOS
+      ?'⚠️ <b>iPhone/iPad canlı ses tanımayı desteklemiyor.</b><br>Android telefonda Chrome kullanın ya da <b>✎ Elle Ekle</b> ile girin.'
+      :'⚠️ <b>Bu tarayıcı ses tanımayı desteklemiyor.</b><br>Chrome ile açmayı deneyin.','hata'); return; }
+  if(!window.isSecureContext){ sesDurum('⚠️ Mikrofon yalnızca güvenli bağlantıda (https) çalışır.','hata'); return; }
+  if(navigator.onLine===false){ sesDurum(SES_HATALARI['network'],'hata'); return; }
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
-    try{
-      const AC=window.AudioContext||window.webkitAudioContext;
-      if(AC){ const ctx=new AC(); const src=ctx.createMediaStreamSource(stream);
-        const hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=120; // uğultu/motor bas sesini kes
-        const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=7500; // tiz gürültüyü yumuşat
-        src.connect(hp); hp.connect(lp); // sadece ısıtma/analiz; SpeechRecognition kendi akışını açar
-        setTimeout(()=>{try{ctx.close();}catch(e){}},400);
-      }
-    }catch(e){}
+    // izin kontrolü — akışı hemen bırakıyoruz, tanımayı SpeechRecognition kendi açacak
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     stream.getTracks().forEach(t=>t.stop());
   }
-  catch(e){ st.textContent='⚠️ Mikrofon izni verilmedi ('+e.name+'). Tarayıcıda bu siteye mikrofon iznini "İzin ver" yap.'; return; }
+  catch(e){
+    sesDurum(SES_HATALARI[e.name==='NotAllowedError'?'not-allowed':'audio-capture']
+      ||('⚠️ Mikrofon açılamadı ('+e.name+').'),'hata');
+    return;
+  }
   recog=new SR(); recog.lang='tr-TR'; recog.continuous=true; recog.interimResults=true; recog.maxAlternatives=3;
   let base=document.getElementById('voiceText').value;
   recog.onresult=e=>{
@@ -1201,19 +1223,24 @@ async function startVoice(){
     if(lb){lb.style.display='block';
       lb.innerHTML='<div style="background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:10px 12px;font-size:14px;text-align:left;max-height:120px;overflow:auto">'+escapeHtml(full||'…')+'</div>';}
   };
-  recog.onerror=ev=>{ st.textContent='Hata: '+ev.error; };
+  recog.onerror=ev=>{
+    if(ev.error==='aborted')return;                 // biz durdurduk, hata değil
+    sonHata=ev.error||'';
+    sesDurum(SES_HATALARI[ev.error]||('⚠️ Ses tanıma hatası: '+ev.error),'hata');
+  };
   recog.onend=()=>{ if(listening){try{recog.start();}catch(e){}} };
   try{ recog.start(); listening=true;
-    st.innerHTML='<span class="rec-dot"></span> Dinleniyor…';
+    sesDurum('<span class="rec-dot"></span> Dinleniyor… konuşun, parmağınızı kaldırınca duracak');
     document.getElementById('voiceCard').classList.add('live');
     document.getElementById('discWrap').classList.add('rec');
     document.getElementById('micHint').textContent='Dinleniyor… bırakınca duracak';
-  }catch(e){ st.textContent='Başlatılamadı: '+e.message; }
+  }catch(e){ sesDurum('⚠️ Başlatılamadı: '+e.message,'hata'); }
 }
 function stopVoice(){
   if(!listening)return;
   listening=false; try{recog&&recog.stop();}catch(e){}
-  document.getElementById('voiceStatus').textContent='Kayıt durdu.';
+  const st=document.getElementById('voiceStatus');
+  if(st&&!sonHata)st.textContent='Kayıt durdu.';
   document.getElementById('voiceCard').classList.remove('live');
   document.getElementById('discWrap').classList.remove('rec');
   document.getElementById('micHint').textContent='Konuş, otomatik yazıya dökülsün';
@@ -1230,6 +1257,10 @@ function bindHold(el,opts={}){
   const up=e=>{
     e.preventDefault(); clearTimeout(holdTimer);
     if(held){ stopVoice(); autoSaveVoice(); }
+    else{ // kısa dokunuş: sessiz kalma, ne yapılacağını söyle
+      sesDurum('🎤 Mikrofonu <b>basılı tutun</b>, konuşun, bitince bırakın.','uyari');
+      setTimeout(()=>{ if(!listening)sesDurum(''); },3500);
+    }
   };
   el.addEventListener('pointerdown',e=>{ try{el.setPointerCapture(e.pointerId);}catch(_){}; down(e); });
   el.addEventListener('pointerup',up);
@@ -1247,7 +1278,17 @@ async function autoSaveVoice(){
   setTimeout(async ()=>{
     const txt=document.getElementById('voiceText').value.trim();
     const lb=document.getElementById('liveBox');
-    if(!txt){ if(lb)lb.style.display='none'; return; }
+    if(!txt){
+      // Sessizce vazgeçme: kullanıcı "hiçbir şey olmuyor" sanmasın
+      if(sonHata){ sesDurum(SES_HATALARI[sonHata]||('⚠️ Ses tanıma hatası: '+sonHata),'hata'); }
+      else{
+        sesDurum('Konuşma yazıya dökülemedi.<br>'
+          +'• Mikrofonu <b>basılı tutarken</b> konuşun, bitince bırakın<br>'
+          +'• Ses tanıma <b>internet</b> gerektirir<br>'
+          +'• Olmuyorsa <b>✎ Elle Ekle</b> ile girebilirsiniz','uyari');
+      }
+      return;
+    }
     const sc=detectStockCommand(txt);
     if(sc){
       const it=await applyStockCommand(sc);
@@ -2908,7 +2949,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · otomatik güncelleme';
+const SURUM='2026-07-28 · ses teşhis';
 
 /* Service worker: uygulama gibi kurulsun, internet yokken de açılsın ve
    GÜNCELLEMELER KENDİLİĞİNDEN İNSİN (silip yeniden kurmaya gerek kalmadan). */
