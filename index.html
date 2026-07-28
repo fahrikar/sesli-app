@@ -205,7 +205,7 @@
     <div class="card" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div><div class="muted" style="font-size:12px">Aktif şantiye</div><div id="aktifSantiye" style="font-weight:600">Şantiye seçilmedi</div></div>
-        <button class="btn sm ghost" onclick="go('sites')">Değiştir</button>
+        <button class="btn sm ghost" id="santiyeBtn" onclick="go('sites')">Değiştir</button>
       </div>
       <div id="homeStats" style="display:flex;gap:10px;margin-top:12px"></div>
     </div>
@@ -1124,6 +1124,8 @@ function manageKalemler(){
 }
 function openSite(id){
   AKTIF_SANTIYE=id;
+  // sonraki açılışta da bu şantiye seçili gelsin
+  if(CURRENT)Store.set('sonSantiye_'+(CURRENT.mudurId||CURRENT.rol),id);
   // Şantiye açılınca önce gider dökümü görünür; kayıt için ayrı buton var
   go('siteDetail');
 }
@@ -1242,7 +1244,7 @@ function initFirebase(){
   }catch(e){ console.warn('Firebase yok:',e); return false; }
 }
 
-function doLogin(){
+async function doLogin(){
   const pin=document.getElementById('pinInput').value.trim();
   const r=ROLES[pin];
   const st=document.getElementById('loginStatus');
@@ -1252,9 +1254,18 @@ function doLogin(){
   document.getElementById('login').classList.remove('active');
   applyRole();
   startCloud();
-  loadSites();loadFabrika();
-  if(CURRENT.rol==='fabrika'){ AKTIF_SANTIYE=null; go('home'); }
-  else go('sites');
+  await loadSites(); loadFabrika();
+  if(CURRENT.rol==='fabrika')AKTIF_SANTIYE=null;
+  else await sonSantiyeyiGeriYukle();     // en son çalışılan şantiye seçili gelsin
+  // Uygulama açılışında mikrofon/kamera ekranı karşılar
+  go('home');
+}
+/* Son seçilen şantiyeyi hatırla — açılışta kayıt için hazır olsun */
+async function sonSantiyeyiGeriYukle(){
+  const kayitli=await Store.get('sonSantiye_'+(CURRENT.mudurId||CURRENT.rol),null);
+  const uygun=mySites();
+  if(kayitli&&uygun.some(s=>s.id===kayitli)){ AKTIF_SANTIYE=kayitli; return; }
+  AKTIF_SANTIYE=(uygun.length===1)?uygun[0].id:null;   // tek şantiyesi varsa otomatik seç
 }
 function logout(){
   CURRENT=null;
@@ -1339,7 +1350,18 @@ function go(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(secId).classList.add('active');
   document.getElementById('hdrTitle').textContent=titles[id]||'Kayıt';
-  if(id==='home'){const sn=document.getElementById('aktifSantiye'); if(sn){const st=SITES.find(x=>x.id===AKTIF_SANTIYE);sn.textContent=st?st.ad:'Şantiye seçilmedi';} renderHomeStats();}
+  if(id==='home'){
+    const sn=document.getElementById('aktifSantiye');
+    const st=SITES.find(x=>x.id===AKTIF_SANTIYE);
+    if(sn){
+      sn.textContent=st?st.ad:'Şantiye seçilmedi';
+      sn.style.color=st?'':'var(--danger)';
+    }
+    // şantiye seçilmemişse butonu belirginleştir (müdürün kaydı şantiyeye bağlı olmalı)
+    const sb=document.getElementById('santiyeBtn');
+    if(sb){ sb.textContent=st?'Değiştir':'Şantiye Seç'; sb.className='btn sm'+(st?' ghost':''); }
+    renderHomeStats();
+  }
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   const map={sites:'nSites',siteDetail:'nSites',home:'nHome',notes:'nNotes',reports:'nReports',stock:'nStock',muhasebe:'nMuh',payments:'nPayments'};
   if(map[id])document.getElementById(map[id]).classList.add('on');
@@ -3208,7 +3230,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · şantiye dökümü';
+const SURUM='2026-07-28 · ana ekran açılış';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
