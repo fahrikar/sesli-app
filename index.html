@@ -401,9 +401,13 @@
 const ODEME_YONTEMLERI=[
   {k:'nakit',   ad:'Nakit',          belge:false},
   {k:'havale',  ad:'Banka Havalesi', belge:true, belgeAd:'Dekont'},
-  {k:'cek',     ad:'Çek',            belge:true, belgeAd:'Çek görseli'},
-  {k:'kredi',   ad:'Kredi Kartı',    belge:true, belgeAd:'Kart fişi'}
+  {k:'cek',     ad:'Çek',            belge:true, belgeAd:'Çek görüntüsü'},
+  {k:'kredi',   ad:'Kredi Kartı',    belge:true, belgeAd:'Kredi kartı slipi'}
 ];
+/* Bu kategorilere yapılan ödemelerde belge, patron dahil herkes için zorunludur */
+function belgeZorunluKategori(ad){
+  return SANTIYE_KATEGORILERI.some(k=>trLower(k)===trLower(ad||''));
+}
 
 let PENDING_KDV=20;
 function kdvSecHTML(){
@@ -463,11 +467,17 @@ function pickDoc(ev){
   };
   r.readAsDataURL(f);
 }
-/* belge şartı: müdür için zorunlu, patron için değil */
-function belgeGerekliMi(){
+/* Belge şartı:
+   - Nakit ödemede belge istenmez.
+   - Banka/çek/kredi kartı ödemesinde: müdür için her zaman zorunlu.
+   - Standart şantiye kategorilerinde (demir, beton, hırdavat, nakliye,
+     işçi ödemeleri, harfiyat, vinç) patron da muaf değildir. */
+function belgeGerekliMi(items){
   const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
   if(!o||!o.belge)return false;
-  if(CURRENT&&CURRENT.rol==='patron')return false; // patron muaf
+  const kontrolluKalem=(items||[]).some(i=>belgeZorunluKategori(i.known||i.category));
+  if(kontrolluKalem)return true;                    // kategori bazlı zorunluluk
+  if(CURRENT&&CURRENT.rol==='patron')return false;  // diğer kalemlerde patron muaf
   return true;
 }
 async function uploadDoc(noteId){
@@ -551,10 +561,10 @@ async function processWithAI(txt){
     showAiConfirm(parseItems(txt),txt,'hata');
   }
 }
-function showAiConfirm(items,rawText,fallback){
+function showAiConfirm(items,rawText,fallback,elle){
   const box=document.getElementById('confirmBox');
   if(!box)return;
-  AI_PENDING={items,rawText};
+  AI_PENDING={items,rawText,elle:!!elle};
   if(!items.length){
     box.style.display='block';
     box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">Anlaşılamadı</div>'
@@ -591,7 +601,7 @@ function showAiConfirm(items,rawText,fallback){
 async function confirmAi(){
   onayDinlemeDur();
   if(!AI_PENDING)return;
-  if(belgeGerekliMi()&&!PENDING_DOC){
+  if(belgeGerekliMi(AI_PENDING.items)&&!PENDING_DOC){
     const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
     alert('⚠️ '+o.ad+' için '+(o.belgeAd||'belge')+' zorunlu. Fotoğraf ekle, sonra onayla.');
     speak('Belge gerekli. Lütfen '+(o.belgeAd||'belge')+' ekle.','kayit');
@@ -600,7 +610,8 @@ async function confirmAi(){
   const noteId=Date.now();
   const belgeUrl=await uploadDoc(noteId);
   const yontem=(ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD)||{}).ad||'Nakit';
-  const yeni={id:noteId,type:'ai',text:AI_PENDING.rawText,items:AI_PENDING.items,
+  const anomali=checkAnomalies(AI_PENDING.items,noteId);
+  const yeni={id:noteId,type:AI_PENDING.elle?'elle':'ai',text:AI_PENDING.rawText,items:AI_PENDING.items,
     odeme:yontem,belge:belgeUrl||null,
     fabrika:(CURRENT&&CURRENT.rol==='fabrika'),mudurId:CURRENT?CURRENT.mudurId:null,
     kdvOran:PENDING_KDV,
@@ -615,7 +626,9 @@ async function confirmAi(){
   });
   PAYMENTS.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
   await Store.set('payments',PAYMENTS);
-  sayItems(AI_PENDING.items,[]);
+  if(anomali.length){const a=anomali[0];
+    speak('Dikkat. '+a.kategori+' için '+Math.round(a.tutar).toLocaleString('tr-TR')+' girildi. Kontrol et.','anomali');
+  }else sayItems(AI_PENDING.items,[]);
   AI_PENDING=null; renderTable(); if(typeof renderFabrika==='function'&&CURRENT&&CURRENT.rol==='fabrika')renderFabrika();
   const box=document.getElementById('confirmBox');
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Kaydedildi</div>';
@@ -741,21 +754,47 @@ function renderFabrika(){
 /* ============================================================
    ŞANTİYE & GİDER KALEMLERİ
    ============================================================ */
-let SITES=[];   // {id, ad, mudurId}
+let SITES=[];   // {id, ad, mudurId, ekleyen}
 let GIDER_KALEMLERI=[]; // düzenlenebilir gider kalemi adları
-const VARSAYILAN_KALEMLER=['İşçi Ödemeleri','Yapı Malzemeleri','Beton Ödemeleri','Demir Ödemeleri','Verilen Borç/Emanet','Nakliye','Yakıt','Diğer'];
+
+/* Tüm şantiyelerde bulunan standart kategoriler.
+   Bunlara yapılan ödemelerde, ödeme yöntemine göre belge zorunludur
+   (banka→dekont, çek→çek görüntüsü, kredi kartı→slip). */
+const SANTIYE_KATEGORILERI=['Demir','Beton','Hırdavat','Nakliye','İşçi Ödemeleri','Harfiyat','Vinç Ödemeleri'];
+const VARSAYILAN_KALEMLER=SANTIYE_KATEGORILERI.slice();
 let AKTIF_SANTIYE=null; // seçili şantiye id
 
+/* Standart kategorileri her şantiyeye ekler (mevcut özel kalemler korunur) */
+async function santiyeKategorileriYay(){
+  let degisti=false;
+  SITES.forEach(s=>{
+    s.kalemler=s.kalemler||GIDER_KALEMLERI.slice();
+    SANTIYE_KATEGORILERI.forEach(k=>{
+      if(!s.kalemler.some(x=>trLower(x)===trLower(k))){ s.kalemler.push(k); degisti=true; }
+    });
+    if(!s.ekleyen){ s.ekleyen='mudur'; degisti=true; }   // eski kayıtlar müdür eklemiş sayılır
+  });
+  if(degisti){
+    await Store.set('sites',SITES);
+    if(cloudOn)SITES.forEach(s=>db.ref('sites/'+s.id).set(s));
+  }
+  return degisti;
+}
 async function loadSites(){
   SITES=await Store.get('sites',[]);
   GIDER_KALEMLERI=await Store.get('giderKalemleri',VARSAYILAN_KALEMLER.slice());
+  // eksik standart kategorileri tamamla
+  SANTIYE_KATEGORILERI.forEach(k=>{ if(!GIDER_KALEMLERI.some(x=>trLower(x)===trLower(k)))GIDER_KALEMLERI.push(k); });
+  await Store.set('giderKalemleri',GIDER_KALEMLERI);
+  await santiyeKategorileriYay();
   if(cloudOn){
-    db.ref('sites').on('value',snap=>{ const v=snap.val(); if(v){SITES=Object.values(v);Store.set('sites',SITES);if(document.getElementById('siteScreen'))renderSites();}});
+    db.ref('sites').on('value',async snap=>{ const v=snap.val(); if(v){SITES=Object.values(v);await santiyeKategorileriYay();Store.set('sites',SITES);if(document.getElementById('siteScreen'))renderSites();}});
     db.ref('giderKalemleri').on('value',snap=>{ const v=snap.val(); if(v){GIDER_KALEMLERI=v;Store.set('giderKalemleri',v);}});
   }
 }
 function mySites(){
-  if(CURRENT&&CURRENT.rol==='patron')return SITES;
+  // Patron ekranında yalnızca MÜDÜRLERİN açtığı şantiyeler görünür
+  if(CURRENT&&CURRENT.rol==='patron')return SITES.filter(x=>x.ekleyen!=='patron');
   return SITES.filter(x=>x.mudurId===(CURRENT&&CURRENT.mudurId));
 }
 async function addSite(){
@@ -769,7 +808,8 @@ async function addSite(){
     const idx=parseInt(secim,10)-1;
     mudurId=(mudurler[idx]||mudurler[0]).mudurId;
   }
-  const site={id:'s'+Date.now(),ad:ad.trim(),mudurId,kalemler:GIDER_KALEMLERI.slice()};
+  const site={id:'s'+Date.now(),ad:ad.trim(),mudurId,ekleyen:CURRENT.rol,
+              kalemler:Array.from(new Set(GIDER_KALEMLERI.concat(SANTIYE_KATEGORILERI)))};
   SITES.push(site); await Store.set('sites',SITES);
   if(cloudOn)db.ref('sites/'+site.id).set(site);
   renderSites();
@@ -836,11 +876,14 @@ function renderSites(){
   const list=mySites();
   // üst şerit: başlık solda, küçük "+ ekle" sağ köşede
   let html='<div style="display:flex;justify-content:space-between;align-items:center;margin:2px 4px 12px">'
-    +'<span class="muted">'+(patron?'Tüm şantiyeler':'Şantiyelerin')+' ('+list.length+')</span>'
-    +'<span onclick="addSite()" style="cursor:pointer;color:var(--gold,#b0863f);font-size:13px;font-weight:600">+ şantiye ekle</span>'
+    +'<span class="muted">'+(patron?'Müdürlerin şantiyeleri':'Şantiyelerin')+' ('+list.length+')</span>'
+    // şantiyeyi müdürler açar; patron yalnızca görüntüler
+    +(patron?'':'<span onclick="addSite()" style="cursor:pointer;color:var(--gold,#b0863f);font-size:13px;font-weight:600">+ şantiye ekle</span>')
     +'</div>';
   if(patron)html+='<div style="text-align:right;margin:-6px 4px 12px"><span onclick="manageKalemler()" class="muted" style="cursor:pointer;font-size:12px;text-decoration:underline">gider kalemleri</span></div>';
-  if(!list.length){html+='<div class="empty">Henüz şantiye yok.<br>Sağ üstten "+ şantiye ekle" ile başla.</div>';box.innerHTML=html;return;}
+  if(!list.length){html+='<div class="empty">'+(patron
+      ?'Müdürler henüz şantiye açmadı.<br>Bir müdür şantiye açtığında burada görünür.'
+      :'Henüz şantiye yok.<br>Sağ üstten "+ şantiye ekle" ile başla.')+'</div>';box.innerHTML=html;return;}
 
   const kart=s=>{
     const t=siteTotals(s.id);
@@ -1203,21 +1246,14 @@ async function submitManual(){
   });
   if(!items.length){alert('En az bir geçerli tutar gir.');return;}
   closeManual();
-  // Müdürse onaya, patronsa direkt
+  const ozet=items.map(i=>i.known+' '+i.amount).join(', ');
+  // Müdür kendi onay ekranından geçer
   if(CURRENT&&CURRENT.rol==='mudur'){
-    showManagerConfirm(items,[],items.map(i=>i.known+' '+i.amount).join(', '));
+    showManagerConfirm(items,[],ozet);
     return;
   }
-  const noteId=Date.now();
-  const anomali=checkAnomalies(items,noteId);
-  const yeni={id:noteId,type:'elle',text:items.map(i=>i.known+' '+i.amount).join(', '),items,createdAt:new Date().toISOString()};
-  NOTES.unshift(yeni);
-  await Store.set('notes',NOTES);
-  pushCloudNote(yeni);
-  if(anomali.length){const a=anomali[0];
-    speak('Dikkat. '+a.kategori+' için '+Math.round(a.tutar).toLocaleString('tr-TR')+' girildi. Kontrol et.','anomali');
-  }else sayItems(items,[]);
-  renderTable();
+  // Patron da onay ekranından geçer: ödeme yöntemi ve zorunlu belge burada seçilir
+  showAiConfirm(items,ozet,null,true);
 }
 
 /* ---------- MÜDÜR ONAY EKRANI ---------- */
@@ -1251,7 +1287,7 @@ function showManagerConfirm(bilinen,bilinmeyen,rawText){
 async function confirmManager(){
   onayDinlemeDur();
   if(!PENDING)return;
-  if(belgeGerekliMi()&&!PENDING_DOC){
+  if(belgeGerekliMi(PENDING.bilinen)&&!PENDING_DOC){
     const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
     alert('⚠️ '+o.ad+' için '+(o.belgeAd||'belge')+' zorunlu. Fotoğraf ekle, sonra onayla.');
     speak('Belge gerekli. Lütfen '+(o.belgeAd||'belge')+' ekle.','kayit');
@@ -1325,6 +1361,7 @@ const MULW={'bin':1000,'milyon':1000000,'milyar':1000000000};
 function wordsToNumbers(text){
   const toks=text.split(/(\s+)/);
   const out=[]; let cur=0, seg=0, active=false;
+  let sonRakamIdx=-1;   // "15 bin" için: son yazılan düz rakamın out içindeki yeri
   const flush=()=>{ if(active){ out.push(String(cur+seg)); cur=0; seg=0; active=false; } };
   for(let i=0;i<toks.length;i++){
     const t=toks[i];
@@ -1333,14 +1370,22 @@ function wordsToNumbers(text){
     if(NUMW[w]!==undefined){
       const v=NUMW[w];
       if(v===100){ seg=(seg===0?1:seg)*100; } else { seg+=v; }
-      active=true; continue;
+      active=true; sonRakamIdx=-1; continue;
     }
     if(MULW[w]!==undefined){
       const m=MULW[w];
-      cur+=(seg===0?1:seg)*m; seg=0; active=true; continue;
+      // rakamla yazılmış sayı + çarpan: "15 bin" -> 15000
+      if(!active&&sonRakamIdx>=0){
+        const taban=toNumber(out[sonRakamIdx]);
+        if(taban!==null){ out[sonRakamIdx]=String(taban*m); sonRakamIdx=-1; continue; }
+      }
+      cur+=(seg===0?1:seg)*m; seg=0; active=true; sonRakamIdx=-1; continue;
     }
-    if(/^\d+([.,]\d+)*$/.test(w)&&active){ flush(); out.push(' '+t); continue; }
-    flush(); out.push(t);
+    const duzRakam=/^\d+([.,]\d+)*$/.test(w);
+    if(duzRakam&&active){ flush(); sonRakamIdx=out.length; out.push(' '+t); continue; }
+    flush();
+    sonRakamIdx=duzRakam?out.length:-1;
+    out.push(t);
   }
   flush();
   return out.join('').replace(/\s+/g,' ').trim();
@@ -1469,13 +1514,18 @@ const CATEGORY_MAP=[
   {ad:'Tahsilat',          grup:'Gelir',                      kelimeler:['tahsilat','tahsil','gelir','ödeme aldım']},
   {ad:'Ev Gideri',         grup:'Gider',                      kelimeler:['ev gider','ev gideri','ev harcama','ev masraf']},
   {ad:'Fabrika Gideri',    grup:'Fabrika Giderleri',          kelimeler:['fabrika gider','fabrika gideri','fabrika masraf']},
-  {ad:'İşçi Ödemesi',      grup:'Fabrika Giderleri',          kelimeler:['işçi','isci','personel','yevmiye','maaş','maas','işçi ödeme']},
+  {ad:'İşçi Ödemeleri',    grup:'Şantiye Giderleri',          kelimeler:['işçi','isci','personel','yevmiye','maaş','maas','işçi ödeme']},
+  {ad:'Demir',             grup:'Şantiye Giderleri',          kelimeler:['demir','nervür','nervur','hasır çelik','hasir celik','filiz','çelik','celik']},
+  {ad:'Beton',             grup:'Şantiye Giderleri',          kelimeler:['beton','hazır beton','hazir beton','mikser','şap','sap','pompa']},
+  {ad:'Hırdavat',          grup:'Şantiye Giderleri',          kelimeler:['hırdavat','hirdavat','çivi','civi','vida','civata','tel']},
+  {ad:'Harfiyat',          grup:'Şantiye Giderleri',          kelimeler:['harfiyat','hafriyat','kazı','kazi','kepçe','kepce','ekskavatör','ekskavator','dozer']},
+  {ad:'Vinç Ödemeleri',    grup:'Şantiye Giderleri',          kelimeler:['vinç','vinc','kule vinç','kule vinc','forklift','manlift']},
   {ad:'Diğer Gider',       grup:'Fabrika Giderleri',          kelimeler:['diğer gider','diger gider','genel gider']},
   {ad:'Söve Hammaddesi',   grup:'Söve ve Boya Hammaddeleri',  kelimeler:['söve','sove','strafor','ströfor']},
   {ad:'Boya Hammaddesi',   grup:'Söve ve Boya Hammaddeleri',  kelimeler:['boya','astar','vernik','tiner']},
-  {ad:'İnşaat Malzemesi',  grup:'İnşaat Malzemeleri',         kelimeler:['inşaat','insaat','çimento','cimento','demir','kum','tuğla','tugla','kereste','beton','alçı','alci']},
+  {ad:'İnşaat Malzemesi',  grup:'İnşaat Malzemeleri',         kelimeler:['inşaat','insaat','çimento','cimento','kum','tuğla','tugla','kereste','alçı','alci']},
   {ad:'Yakıt',             grup:'Gider',                      kelimeler:['yakıt','yakit','mazot','benzin','motorin']},
-  {ad:'Nakliye',           grup:'Gider',                      kelimeler:['nakliye','kargo','sevkiyat','taşıma']},
+  {ad:'Nakliye',           grup:'Şantiye Giderleri',          kelimeler:['nakliye','kargo','sevkiyat','taşıma']},
   {ad:'Kira',              grup:'Gider',                      kelimeler:['kira']},
   {ad:'Vergi',             grup:'Gider',                      kelimeler:['vergi','sgk','stopaj']},
   {ad:'Elektrik',          grup:'Gider',                      kelimeler:['elektrik']},
