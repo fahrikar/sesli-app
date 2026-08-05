@@ -765,7 +765,7 @@ async function sonKaydiGeriAl(id){
   renderTable();
   const box=document.getElementById('confirmBox');
   box.innerHTML='<div class="card" style="text-align:center">Kayıt geri alındı</div>';
-  speak('Kayıt geri alındı.','kayit');
+  
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2000);
 }
 function showAiConfirm(items,rawText,fallback,elle,yontem){
@@ -777,7 +777,7 @@ function showAiConfirm(items,rawText,fallback,elle,yontem){
     box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">Anlaşılamadı</div>'
       +'<div class="muted" style="margin-bottom:12px">"'+escapeHtml(rawText)+'"<br>Kalem çıkarılamadı, tekrar dener misin?</div>'
       +'<button class="btn sm ghost" onclick="cancelAi()">Kapat</button></div>';
-    speak('Anlayamadım, tekrar dener misin?','kayit');
+    
     return;
   }
   box.style.display='flex';
@@ -814,7 +814,7 @@ function santiyeSeciliMi(){
   if(AKTIF_SANTIYE&&SITES.some(s=>s.id===AKTIF_SANTIYE))return true;
   sesDurum('⚠️ <b>Önce şantiye seçin.</b><br>Şantiye seçmeden yapılan kayıt patronun ekranına düşmez. '
     +'Alttaki <b>Şantiye</b> sekmesinden bir şantiye açın.','hata');
-  speak('Önce şantiye seçin.','kayit');
+  
   return false;
 }
 
@@ -849,7 +849,7 @@ async function confirmAi(){
   if(belgeGerekliMi(AI_PENDING.items)&&!PENDING_DOC){
     const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
     alert('⚠️ '+o.ad+' için '+(o.belgeAd||'belge')+' zorunlu. Fotoğraf ekle, sonra onayla.');
-    speak('Belge gerekli. Lütfen '+(o.belgeAd||'belge')+' ekle.','kayit');
+    
     return;
   }
   const belgeUrl=await uploadDoc(Date.now());
@@ -869,7 +869,7 @@ async function confirmAi(){
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Kaydedildi</div>';
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2500);
 }
-function cancelAi(){ onayDinlemeDur(); AI_PENDING=null; const b=document.getElementById('confirmBox'); b.style.display='none'; b.innerHTML=''; speak('İptal edildi.','kayit'); }
+function cancelAi(){ onayDinlemeDur(); AI_PENDING=null; const b=document.getElementById('confirmBox'); b.style.display='none'; b.innerHTML='';  }
 
 
 
@@ -904,7 +904,7 @@ async function confirmSatis(){
   box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Satış kaydedildi</div>';
   setTimeout(()=>{box.style.display='none';box.innerHTML='';},2500);
 }
-function cancelSatis(){ onayDinlemeDur(); SATIS_PENDING=null; const b=document.getElementById('confirmBox'); b.style.display='none'; b.innerHTML=''; speak('İptal edildi.','kayit'); }
+function cancelSatis(){ onayDinlemeDur(); SATIS_PENDING=null; const b=document.getElementById('confirmBox'); b.style.display='none'; b.innerHTML='';  }
 
 
 /* ============================================================
@@ -955,7 +955,7 @@ function belgeEkleKayda(noteId){
             box.innerHTML='<div class="card" style="text-align:center;color:var(--ok);font-weight:600">✓ Belge eklendi</div>';
             setTimeout(()=>{box.style.display='none';box.innerHTML='';},1800);
           }
-          speak('Belge eklendi.','kayit');
+          
         }
         inp.remove();
       };
@@ -1783,7 +1783,7 @@ async function autoSaveVoice(){
     // FABRİKA rolü: satış mı gider mi?
     if(CURRENT&&CURRENT.rol==='fabrika'&&isSatis(txt)){
       const sat=parseSatis(txt);
-      if(!sat){ speak('Satış tutarı anlaşılamadı. Örnek: 150 metrekare söve satıldı 36 bin 350 lira.','kayit'); return; }
+      if(!sat){ return; }
       showSatisConfirm(sat,txt);
       return;
     }
@@ -1875,7 +1875,7 @@ function showManagerConfirm(bilinen,bilinmeyen,rawText){
     box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">Tanımlı kalem bulunamadı</div>'
       +'<div class="muted" style="margin-bottom:12px">"'+escapeHtml(rawText)+'" içinde gönderilecek tanımlı bir gider yok. Tekrar dene.</div>'
       +'<button class="btn sm ghost" onclick="cancelManager()">Kapat</button></div>';
-    speak('Tanımlı kalem bulunamadı. Tekrar dene.','kayit');
+    
     return;
   }
   box.style.display='flex';
@@ -1899,7 +1899,7 @@ async function confirmManager(){
   if(belgeGerekliMi(PENDING.bilinen)&&!PENDING_DOC){
     const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
     alert('⚠️ '+o.ad+' için '+(o.belgeAd||'belge')+' zorunlu. Fotoğraf ekle, sonra onayla.');
-    speak('Belge gerekli. Lütfen '+(o.belgeAd||'belge')+' ekle.','kayit');
+    
     return;
   }
   const noteId=Date.now();
@@ -1924,7 +1924,7 @@ function cancelManager(){
   onayDinlemeDur(); PENDING=null;
   const box=document.getElementById('confirmBox');
   box.style.display='none'; box.innerHTML='';
-  speak('İptal edildi.','kayit');
+  
 }
 
 /* ---------- KAMERA + OCR ---------- */
@@ -2189,9 +2189,9 @@ function sayItems(bilinen,bilinmeyen){
     const parts=bilinen.map(i=>i.known+' '+Math.round(i.amount).toLocaleString('tr-TR'));
     speak(parts.join(', ')+' kaydedildi.','kayit');
   }else if(bilinmeyen.length){
-    speak('Tanımlanamadı. Lütfen kontrol et.','kayit');
+    
   }else{
-    speak('Tutar algılanamadı.','kayit');
+    
   }
 }
 async function toggleSes(tip){
@@ -3000,9 +3000,9 @@ function renderTable(){
   /* Kayıt yokken de yönetim kartları görünmeli: aksi halde patron ilk
      kurulumda müdür atayamıyor, müdür şifresini değiştiremiyordu. */
   if(!rows.length){
-    box.innerHTML=yedeklemeKarti()
-      +'<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>'
-      +renderKullanicilar();
+    box.innerHTML='<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>'
+      +renderKullanicilar()
+      +yedeklemeKarti();
     return;
   }
   // Borç/alacak gider değildir; kendi kartında toplanır, gider toplamına girmez
@@ -3051,13 +3051,13 @@ function renderTable(){
         +'<button class="btn sm '+(SETTINGS[x.k]!==false?'':'ghost')+'" onclick="toggleSes(\''+x.k+'\')">'
         +(SETTINGS[x.k]!==false?'Açık':'Kapalı')+'</button></div>').join('')
      +'</div>';
-  // Sıra: yedekleme ve borç/alacak en üstte, kullanıcılar en altta
-  html=yedeklemeKarti()
-     +renderBorcAlacak()
+  // Sıra: borç/alacak en üstte; kullanıcılar ve yedekleme en altta
+  html=renderBorcAlacak()
      +renderBelgeBekleyen()
      +sesKarti
      +html
-     +renderKullanicilar();
+     +renderKullanicilar()
+     +yedeklemeKarti();
 
   // tanımsız kalemleri öğretme
   const unkRows=[];
@@ -3289,7 +3289,7 @@ function backupAll(){
   const data={surum:1,tarih:new Date().toISOString(),
     notes:NOTES,payments:PAYMENTS,stock:STOCK,moves:MOVES,lexicon:LEXICON,settings:SETTINGS};
   saveBlob(new Blob([JSON.stringify(data,null,1)],{type:'application/json'}),'Yedek_'+todayStr()+'.json');
-  speak('Yedek alındı.','kayit');
+  
 }
 async function restoreBackup(ev){
   const f=ev.target.files&&ev.target.files[0]; if(!f)return;
@@ -4251,7 +4251,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · sade onay ekranı';
+const SURUM='2026-07-28 · sessiz iptal';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
