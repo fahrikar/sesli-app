@@ -115,25 +115,31 @@
      eklenince içerik alt menünün altına taşıyordu. */
   .split{display:flex;flex-direction:column;gap:14px;margin-top:4px;
     min-height:calc(100vh - 360px);min-height:calc(100dvh - 360px)}
-  .hero{flex:1;min-height:140px;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:14px;border-radius:28px;overflow:hidden;cursor:pointer;border:1px solid var(--line);
+  .hero{--disc:clamp(68px,min(25vw,13vh),116px);
+    flex:1;min-height:140px;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:clamp(8px,1.6vh,14px);border-radius:28px;overflow:hidden;cursor:pointer;border:1px solid var(--line);
     background:var(--card);box-shadow:var(--sh);transition:transform .14s ease}
   .hero:active{transform:scale(.987)}
   .hero.mic{background:radial-gradient(460px 220px at 50% 32%, rgba(180,165,135,.10), transparent 70%), var(--card)}
   .hero.cam{background:radial-gradient(460px 220px at 50% 32%, rgba(180,165,135,.10), transparent 70%), var(--card)}
-  .discwrap{position:relative;display:grid;place-items:center;width:98px;height:98px}
-  .disc{width:98px;height:98px;border-radius:50%;display:grid;place-items:center;position:relative;z-index:2;
+  /* Mikrofon/kamera alanı ekrana göre ölçeklenir: sabit 98px, küçük
+     telefonlarda taşıyor, büyük ekranlarda kaybolmuş duruyordu.
+     Hem genişliğe hem yüksekliğe bakılır (min ile). */
+  .discwrap{position:relative;display:grid;place-items:center;
+    width:var(--disc);height:var(--disc)}
+  .disc{width:var(--disc);height:var(--disc);border-radius:50%;display:grid;place-items:center;position:relative;z-index:2;
     transition:transform .12s ease}
   .discwrap.rec .disc{transform:scale(.94)}
   .disc.mic,.disc.cam{background:linear-gradient(155deg,#fffef9,#ece3d2);border:1px solid #e6dcca;box-shadow:0 14px 30px rgba(90,76,48,.16), inset 0 1px 2px rgba(255,255,255,.85)}
-  .disc svg{width:46px;height:46px}
-  .hero h3{margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em}
-  .hero p{margin:0;color:var(--sub);font-size:14px;text-align:center;padding:0 24px;letter-spacing:-.01em}
+  .disc svg{width:calc(var(--disc)*.47);height:calc(var(--disc)*.47)}
+  .hero h3{margin:0;font-size:clamp(17px,4.9vw,23px);font-weight:600;letter-spacing:-.02em}
+  .hero p{margin:0;color:var(--sub);font-size:clamp(11.5px,3.4vw,14px);text-align:center;
+    padding:0 18px;letter-spacing:-.01em}
 
   /* ses dalgası halkaları */
-  .waves{position:absolute;top:0;left:0;width:98px;height:98px;
+  .waves{position:absolute;top:0;left:0;width:var(--disc);height:var(--disc);
     display:grid;place-items:center;z-index:1;pointer-events:none}
-  .waves span{position:absolute;top:0;left:0;width:98px;height:98px;border-radius:50%;
+  .waves span{position:absolute;top:0;left:0;width:var(--disc);height:var(--disc);border-radius:50%;
     border:1.5px solid #cabfa6;opacity:0;animation:ring 3s linear infinite}
   .waves span:nth-child(1){animation-delay:0s}
   .waves span:nth-child(2){animation-delay:1s}
@@ -1621,7 +1627,7 @@ function sesDurum(mesaj,tur){
 const SES_HATALARI={
   'not-allowed':'⚠️ <b>Mikrofon izni yok.</b><br>Chrome → adres çubuğundaki kilit → İzinler → Mikrofon → <b>İzin ver</b>. Uygulama olarak kurduysanız: Telefon Ayarları → Uygulamalar → Chrome → İzinler → Mikrofon.',
   'service-not-allowed':'⚠️ <b>Mikrofon izni engellenmiş.</b><br>Telefon Ayarları → Uygulamalar → Chrome → İzinler → Mikrofon → İzin ver.',
-  'network':'⚠️ <b>İnternet gerekiyor.</b><br>Konuşmayı yazıya çevirme Google sunucusunda yapılıyor. Şantiyede çekmiyorsa <b>✎ Elle Ekle</b> ile girebilirsiniz.',
+  'network':'Ses alınamadı, tekrar deneyin.<br>Sürerse <b>✎ Elle Ekle</b> ile girebilirsiniz.',
   'no-speech':'Ses alınamadı. Mikrofona biraz daha yakın ve <b>bırakmadan önce</b> konuşun.',
   'audio-capture':'⚠️ <b>Mikrofona ulaşılamadı.</b><br>Başka bir uygulama mikrofonu kullanıyor olabilir; onu kapatıp tekrar deneyin.',
   'language-not-supported':'⚠️ Türkçe ses tanıma bu cihazda yok. Chrome ve Google uygulamasını güncelleyin.'
@@ -1638,7 +1644,6 @@ function startVoice(){
       +(IOS?'iPhone’da <b>Safari</b> ile açın (iOS 14.5 ve üzeri gerekir).':'Chrome ile açmayı deneyin.')
       +'<br>Ya da <b>✎ Elle Ekle</b> ile girebilirsiniz.','hata'); return; }
   if(!window.isSecureContext){ sesDurum('⚠️ Mikrofon yalnızca güvenli bağlantıda (https) çalışır.','hata'); return; }
-  if(navigator.onLine===false){ sesDurum(SES_HATALARI['network'],'hata'); return; }
   recog=new SR(); recog.lang='tr-TR';
   recog.continuous=!IOS;              // Safari'de continuous sorunlu; onend ile sürdürüyoruz
   recog.interimResults=true; recog.maxAlternatives=3;
@@ -1742,7 +1747,6 @@ async function autoSaveVoice(){
       else{
         sesDurum('Konuşma yazıya dökülemedi.<br>'
           +'• Mikrofonu <b>basılı tutarken</b> konuşun, bitince bırakın<br>'
-          +'• Ses tanıma <b>internet</b> gerektirir<br>'
           +'• Olmuyorsa <b>✎ Elle Ekle</b> ile girebilirsiniz','uyari');
       }
       return;
@@ -1944,7 +1948,7 @@ async function runOCR(dataURL){
     await worker.terminate();
     document.getElementById('ocrText').value=(text||'').trim();
     st.textContent=text.trim()?'✅ Okundu. Gerekirse düzelt ve kaydet.':'Metin bulunamadı, elle yazabilirsin.';
-  }catch(e){ st.textContent='OCR yüklenemedi (internet gerekir). Metni elle yazabilirsin.'; }
+  }catch(e){ st.textContent='Metin okunamadı. Elle yazabilirsiniz.'; }
 }
 
 
@@ -2634,7 +2638,7 @@ async function runDocOCR(){
     document.getElementById('ocrText').value=clean;
     st.textContent=clean?'✅ Okundu. Aşağıda fişten kalem çıkarabilirsin.':'Metin bulunamadı.';
     suggestFromReceipt(clean);
-  }catch(e){ st.textContent='OCR yüklenemedi (internet gerekir).'; }
+  }catch(e){ st.textContent='Metin okunamadı, tekrar deneyin.'; }
 }
 /* ---------- TARANAN BELGEYİ DIŞA AKTAR (PDF / Word / Excel) ---------- */
 function belgeAktar(tip){
@@ -3156,7 +3160,7 @@ function saveBlob(blob,filename){
 }
 function writeWorkbook(wb,filename){
   if(typeof XLSX==='undefined'){
-    alert('Excel kütüphanesi yüklenemedi (internet bağlantısı gerekir). Sayfayı yenileyip tekrar dene, ya da CSV olarak indir.');
+    alert('Excel oluşturulamadı. Sayfayı yenileyip tekrar deneyin ya da CSV olarak indirin.');
     return false;
   }
   try{
@@ -3906,7 +3910,7 @@ async function belgeBilgiAyikla(noteId,sessiz){
     await syncNote(noteId);
     if(!sessiz){ renderMuhasebe(); }
     return e;
-  }catch(err){ if(!sessiz)alert('Belge okunamadı (internet gerekir).'); return null; }
+  }catch(err){ if(!sessiz)alert('Belge okunamadı, tekrar deneyin.'); return null; }
 }
 /* Belgesi olup henüz okunmamış kayıtların hepsini sırayla ayıklar */
 async function tumBelgeleriAyikla(){
@@ -4240,7 +4244,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · arayüz düzeni';
+const SURUM='2026-07-28 · ölçekli mikrofon';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
