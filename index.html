@@ -1787,6 +1787,9 @@ async function autoSaveVoice(){
       showSatisConfirm(sat,txt);
       return;
     }
+    // Kayıtlı bir borca vade ekleme: "Mehmet 3 ay sonra ödeyecek"
+    const vk=vadeKomutuCozumle(txt);
+    if(vk){ await vadeIsle(vk); return; }
     // HERKES: serbest cümle -> AI ayrıştırır -> onaya sunulur
     if(!santiyeSeciliMi())return;
     processWithAI(txt);
@@ -2284,8 +2287,10 @@ function borcTespit(text){
 }
 /* Kişi adını yakalar: "mehmete", "Mehmet'e", "ahmetten" -> Mehmet / Ahmet */
 const KISI_EKLERI=/('?(y[ea]|[ea]|d[ae]n|t[ae]n|nin|n[ıi]n|in|[ıi]n|ye|ya))$/i;
-function kisiAyikla(text){
-  const atla=/^(bugün|bugun|dün|dun|yarın|yarin|sonra|günü|gunu|lira|tl|adet|tane|toplam|para|borç|borc|ödünç|odunc|alacak|emanet|geri|hafta|ay|yıl|yil|sene|için|icin|olarak|kadar)$/i;
+/* gevsek=true: vade komutlarında ad küçük harfle ve eksiz gelebilir
+   ("mehmet 3 ay sonra ödeyecek"); orada büyük harf/ek şartı aranmaz. */
+function kisiAyikla(text,gevsek){
+  const atla=/^(bugün|bugun|dün|dun|yarın|yarin|sonra|günü|gunu|lira|tl|adet|tane|toplam|para|borç|borc|ödünç|odunc|alacak|emanet|geri|hafta|ay|yıl|yil|sene|için|icin|olarak|kadar|ödeyecek|odeyecek|verecek|getirecek|vade|vadesi|vadeyi|tarih|tarihi)$/i;
   const kelimeler=text.split(/\s+/).filter(Boolean);
   for(const ham of kelimeler){
     const k=ham.replace(/[^\wçğıöşüÇĞİÖŞÜ']/g,'');
@@ -2298,7 +2303,7 @@ function kisiAyikla(text){
     if(atla.test(trLower(kok)))continue;
     // ekle çekimlenmişse ya da baş harfi büyükse kişi say
     const cekimli=kok.length<k.length, buyuk=/^[A-ZÇĞİÖŞÜ]/.test(ham);
-    if(!cekimli&&!buyuk)continue;
+    if(!gevsek&&!cekimli&&!buyuk)continue;
     return kok.charAt(0).toLocaleUpperCase('tr-TR')+trLower(kok.slice(1));
   }
   return null;
@@ -2854,6 +2859,93 @@ function borcAlacakKalemleri(){
   }));
   return out.sort((a,b)=>(a.vade||'9999').localeCompare(b.vade||'9999'));
 }
+/* ---------- KAYITLI BORCA SONRADAN VADE EKLEME ----------
+   Sesli komut: kişi + tarih var ama TUTAR yoksa yeni kayıt açmak yerine
+   o kişinin mevcut borç/alacak kaydına vade işlenir.
+   Örnek: "Mehmet 3 ay sonra ödeyecek", "Ahmet'in vadesi 15 eylül" */
+function vadeKomutuCozumle(txt){
+  const sayili=wordsToNumbers(txt);
+  const vade=tarihAyikla(sayili);
+  if(!vade.tarih)return null;              // tarih yoksa vade komutu değil
+  if(parseItems(txt).length)return null;   // tutar varsa yeni kayıttır
+  /* Kişiyi önce KAYITLI borç sahipleriyle eşleştir: konuşma tanıma adı
+     küçük harfle yazabiliyor ("mehmet"), ekli de olmayabiliyor; kayıtlı
+     adla karşılaştırmak bu yüzden en güvenilir yol. */
+  const kalan=trLower(vade.kalan);
+  const adlar=Array.from(new Set(borcAlacakKalemleri().map(x=>x.kisi).filter(a=>a&&a!=='—')));
+  let bulunan=null,enIyi=0;
+  adlar.forEach(a=>{ const sc=fuzzyHas(kalan,a); if(sc>enIyi){enIyi=sc;bulunan=a;} });
+  if(bulunan)return {kisi:bulunan,tarih:vade.tarih};
+  // kayıtlarda yoksa yine de bir ad çıkar ki "bulunamadı" uyarısı verilebilsin
+  const k=kisiAyikla(vade.kalan,true);
+  return k?{kisi:k,tarih:vade.tarih}:null;
+}
+/* Kişiye ait borç/alacak kaydını bul: önce vadesi olmayan, yoksa en yeni */
+function borcKaydiBul(kisi){
+  const hepsi=borcAlacakKalemleri().filter(x=>x.kisi&&fuzzyHas(x.kisi,kisi));
+  if(!hepsi.length)return null;
+  const vadesiz=hepsi.filter(x=>!x.vade);
+  const liste=vadesiz.length?vadesiz:hepsi;
+  return liste.sort((a,b)=>String(b.tarih).localeCompare(String(a.tarih)))[0];
+}
+async function vadeIsle(komut){
+  const hedef=borcKaydiBul(komut.kisi);
+  if(!hedef){
+    sesDurum('⚠️ <b>'+escapeHtml(komut.kisi)+'</b> adına kayıtlı borç/alacak bulunamadı.<br>'
+      +'Önce tutarıyla birlikte söyleyin: "'+escapeHtml(komut.kisi)+'\'e 5000 verdim".','hata');
+    return false;
+  }
+  await vadeYaz(hedef.noteId,hedef.idx,komut.tarih);
+  const n=NOTES.find(x=>x.id===hedef.noteId);
+  const it=n.items[hedef.idx];
+  sesDurum('✓ <b>Vade eklendi</b><br>'+escapeHtml(it.kisi||komut.kisi)+' · '+money(it.amount)
+    +' · <b>'+fmtDate(komut.tarih)+'</b> ('+daysUntil(komut.tarih)+' gün)','uyari');
+  speak(escapeHtml(it.kisi||komut.kisi)+' için vade '+fmtDate(komut.tarih)+' olarak eklendi.','kayit');
+  return true;
+}
+/* Vadeyi kayda yazar ve hatırlatma takvimine ekler */
+async function vadeYaz(noteId,idx,tarih){
+  const n=NOTES.find(x=>x.id===noteId); if(!n)return;
+  const it=(n.items||[])[idx]; if(!it)return;
+  const eski=it.odemeGunu;
+  it.odemeGunu=tarih;
+  await Store.set('notes',NOTES);
+  await syncNote(noteId);
+  // eski hatırlatmayı değiştir
+  if(eski)PAYMENTS=PAYMENTS.filter(p=>!(p.dueDate===eski&&payAmountNum(p)===it.amount));
+  PAYMENTS.push({id:Date.now()+Math.random(),
+    title:(it.kisi?it.kisi+' - ':'')+(it.known||it.category),
+    amount:money(it.amount),dueDate:tarih});
+  PAYMENTS.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  await Store.set('payments',PAYMENTS);
+  pushOdemeler();
+  renderTable();
+}
+/* Listeden elle vade ekleme/değiştirme */
+async function vadeDuzenle(noteId,idx){
+  const n=NOTES.find(x=>x.id===noteId); if(!n)return;
+  const it=(n.items||[])[idx]; if(!it)return;
+  const s=prompt('Vade tarihi (gg.aa.yyyy) ya da "3 ay sonra", "15 eylül" gibi yazabilirsiniz:',
+    it.odemeGunu?fmtDate(it.odemeGunu):'');
+  if(s===null)return;
+  const t=s.trim();
+  if(!t){                                   // boş bırakılırsa vadeyi kaldır
+    if(it.odemeGunu)PAYMENTS=PAYMENTS.filter(p=>!(p.dueDate===it.odemeGunu&&payAmountNum(p)===it.amount));
+    delete it.odemeGunu;
+    await Store.set('notes',NOTES); await Store.set('payments',PAYMENTS);
+    await syncNote(noteId); pushOdemeler(); renderTable();
+    return;
+  }
+  // gg.aa.yyyy ya da serbest metin ("3 ay sonra", "15 eylül")
+  let tarih=null;
+  const m=t.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/);
+  if(m){ const y=m[3].length===2?'20'+m[3]:m[3];
+         tarih=y+'-'+pad(parseInt(m[2],10))+'-'+pad(parseInt(m[1],10)); }
+  else { tarih=(tarihAyikla(wordsToNumbers(t))||{}).tarih; }
+  if(!tarih){ alert('Tarih anlaşılamadı.\n\nÖrnek: 15.09.2026 · 3 ay sonra · 15 eylül'); return; }
+  await vadeYaz(noteId,idx,tarih);
+}
+
 function renderBorcAlacak(){
   const list=borcAlacakKalemleri();
   if(!list.length)return '';
@@ -2867,15 +2959,18 @@ function renderBorcAlacak(){
             :g===1?'<span class="pill" style="color:#a9761e">yarın</span>'
             :'<span class="pill">'+g+' gün</span>')
       : '<span class="pill">vade yok</span>';
-    return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--line)">'
+    // satıra dokunarak vade eklenebilir/değiştirilebilir
+    return '<div onclick="vadeDuzenle('+x.noteId+','+x.idx+')" '
+      +'style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:9px 0;border-top:1px solid var(--line);cursor:pointer">'
       +'<div style="flex:1"><div style="font-weight:500">'+escapeHtml(x.kisi)+' '+durum+'</div>'
       +'<div class="muted" style="font-size:12px">'+(x.yon==='alacak'?'alacak':'borç')
-        +(x.vade?' · '+fmtDate(x.vade):'')+'</div></div>'
+        +(x.vade?' · '+fmtDate(x.vade):' · vade eklemek için dokun')+'</div></div>'
       +'<div style="text-align:right;white-space:nowrap"><b style="color:'+(x.yon==='alacak'?'var(--ok)':'var(--danger)')+'">'
         +(x.yon==='alacak'?'+':'−')+money(x.tutar)+'</b></div></div>';
   };
   return '<div class="card"><div style="font-weight:600;margin-bottom:2px">Borç / Alacak</div>'
-    +'<div class="muted" style="margin-bottom:6px">'+list.length+' kayıt</div>'
+    +'<div class="muted" style="margin-bottom:6px">'+list.length+' kayıt · '
+      +'vade için satıra dokunun ya da <i>"'+escapeHtml((list[0]||{}).kisi||'Mehmet')+' 3 ay sonra ödeyecek"</i> deyin</div>'
     +list.map(satir).join('')
     +'<div style="display:flex;justify-content:space-between;padding:10px 0 2px;border-top:2px solid var(--line);margin-top:6px;font-weight:600">'
       +'<span>Net</span><span>'+money(alacak-borc)+'</span></div>'
@@ -3051,11 +3146,11 @@ function renderTable(){
         +'<button class="btn sm '+(SETTINGS[x.k]!==false?'':'ghost')+'" onclick="toggleSes(\''+x.k+'\')">'
         +(SETTINGS[x.k]!==false?'Açık':'Kapalı')+'</button></div>').join('')
      +'</div>';
-  // Sıra: borç/alacak en üstte; kullanıcılar ve yedekleme en altta
+  // Sıra: borç/alacak ve hemen altında kalem tablosu; yönetim en altta
   html=renderBorcAlacak()
+     +html
      +renderBelgeBekleyen()
      +sesKarti
-     +html
      +renderKullanicilar()
      +yedeklemeKarti();
 
@@ -4251,7 +4346,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · sessiz iptal';
+const SURUM='2026-07-28 · vade ekleme';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
