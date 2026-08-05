@@ -120,12 +120,16 @@
      eklenince içerik alt menünün altına taşıyordu. */
   .split{display:flex;flex-direction:column;gap:14px;margin-top:4px;
     min-height:calc(100vh - 360px);
-    min-height:calc(100dvh - 360px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
-  .hero{--disc:clamp(68px,min(25vw,13vh),116px);
+    min-height:calc(100dvh - 342px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
+  .hero{--disc:clamp(70px,min(26vw,13.5vh),118px);
     flex:1;min-height:140px;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:clamp(8px,1.6vh,14px);border-radius:28px;overflow:hidden;cursor:pointer;border:1px solid var(--line);
     background:var(--card);box-shadow:var(--sh);transition:transform .14s ease}
   .hero:active{transform:scale(.987)}
+  /* Ana ekranda üst boşluklar sıkılaştırıldı; kazanılan yer mikrofon ve
+     kamera kartlarına aktarılıyor. */
+  #home{padding-top:12px}
+  #santiyeKart{padding:14px 16px;margin-bottom:8px}
   .hero.mic{background:radial-gradient(460px 220px at 50% 32%, rgba(180,165,135,.10), transparent 70%), var(--card)}
   .hero.cam{background:radial-gradient(460px 220px at 50% 32%, rgba(180,165,135,.10), transparent 70%), var(--card)}
   /* Mikrofon/kamera alanı ekrana göre ölçeklenir: sabit 98px, küçük
@@ -257,12 +261,12 @@
   <!-- HOME -->
   <section class="screen" id="home">
     <div id="reminderBox"></div>
-    <div class="card" style="margin-bottom:10px">
+    <div class="card" id="santiyeKart">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div><div class="muted" style="font-size:12px">Aktif şantiye</div><div id="aktifSantiye" style="font-weight:600">Şantiye seçilmedi</div></div>
         <button class="btn sm ghost" id="santiyeBtn" onclick="go('sites')">Değiştir</button>
       </div>
-      <div id="homeStats" style="display:flex;gap:10px;margin-top:12px"></div>
+      <div id="homeStats" style="display:flex;gap:10px;margin-top:10px"></div>
       <div id="belgeUyari"></div>
     </div>
     <div class="split">
@@ -4256,7 +4260,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · marka hizası';
+const SURUM='2026-07-28 · mikrofon alanı';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
