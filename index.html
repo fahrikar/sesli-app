@@ -45,24 +45,26 @@
     -webkit-font-smoothing:antialiased;
     display:flex;flex-direction:column;min-height:100vh;
   }
+  /* Ekran adı çubuğu — markanın altında, ondan daha sakin durmalı */
   header{
-    padding:16px 20px;font-weight:600;font-size:16px;letter-spacing:-.01em;
-    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 20px 11px;font-weight:600;font-size:14px;letter-spacing:-.01em;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
     background:rgba(250,246,238,.7);backdrop-filter:saturate(180%) blur(14px);
     border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;
   }
-  header small{font-weight:400;color:var(--sub);font-size:12px}
+  header small{font-weight:400;color:var(--sub);font-size:11px;text-align:right;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%}
 
   /* MARKA — sayfanın krem/altın tonuyla uyumlu, alttan ışıklı */
   .marka{
     position:sticky;top:0;z-index:6;
     background:linear-gradient(180deg,#fffdf8 0%, var(--bg2) 100%);
     border-bottom:1px solid var(--line);
-    padding:14px 20px 13px;text-align:center;overflow:hidden;
+    padding:15px 20px 14px;text-align:center;overflow:hidden;
   }
   .marka span{
     position:relative;display:inline-block;
-    font-size:16px;font-weight:700;letter-spacing:.26em;text-indent:.26em;
+    font-size:17px;font-weight:700;letter-spacing:.24em;text-indent:.24em;
     text-transform:uppercase;
     color:var(--graphite);                 /* gradient desteklenmezse düz renk */
   }
@@ -112,7 +114,7 @@
   /* Sabit yükseklik yerine esnek: marka çubuğu, üstteki kart ve alt menü
      eklenince içerik alt menünün altına taşıyordu. */
   .split{display:flex;flex-direction:column;gap:14px;margin-top:4px;
-    min-height:calc(100vh - 345px);min-height:calc(100dvh - 345px)}
+    min-height:calc(100vh - 360px);min-height:calc(100dvh - 360px)}
   .hero{flex:1;min-height:140px;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:14px;border-radius:28px;overflow:hidden;cursor:pointer;border:1px solid var(--line);
     background:var(--card);box-shadow:var(--sh);transition:transform .14s ease}
@@ -211,8 +213,7 @@
       <input id="pinInput" type="tel" inputmode="numeric" maxlength="8" placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:8px" onkeydown="if(event.key==='Enter')doLogin()">
       <button class="btn" style="margin-top:14px" onclick="doLogin()">Gir</button>
       <div class="status" id="loginStatus"></div>
-      <div id="cloudWarn" class="muted" style="margin-top:24px;font-size:12px"></div>
-      <div id="surumBilgi" class="muted" style="margin-top:10px;font-size:11px;opacity:.7"></div>
+      <div id="surumBilgi" class="muted" style="margin-top:22px;font-size:11px;opacity:.6"></div>
     </div>
   </section>
 
@@ -485,7 +486,8 @@
   </div>
 </main>
 
-<nav>
+<!-- Giriş yapılmadan menü görünmez -->
+<nav id="altMenu" style="display:none">
   <button id="nSites" onclick="go('sites')">
     <svg viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V8l7-4 7 4v13"/><rect x="9" y="12" width="6" height="9"/></svg>Şantiye</button>
   <button id="nFab" onclick="go('fabrika')" style="display:none">
@@ -1432,7 +1434,9 @@ async function doLogin(){
   CURRENT={rol:u.rol, ad:u.ad, mudurId:u.mudurId};
   document.getElementById('login').style.display='none';
   document.getElementById('login').classList.remove('active');
-  document.getElementById('ustBar').style.display='';   // giriş sonrası ekran adı görünür
+  // giriş sonrası üst bar ve alt menü görünür
+  document.getElementById('ustBar').style.display='';
+  document.getElementById('altMenu').style.display='flex';
   applyRole();
   startCloud();
   await loadSites(); loadFabrika();
@@ -1453,6 +1457,7 @@ function logout(){
   document.getElementById('pinInput').value='';
   document.getElementById('loginStatus').textContent='';
   document.getElementById('ustBar').style.display='none';   // markayı yalnız bırak
+  document.getElementById('altMenu').style.display='none';
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   const lg=document.getElementById('login'); lg.style.display='block';
 }
@@ -1478,11 +1483,7 @@ function applyRole(){
 
 /* Bulut senkron: müdür yazar, patron dinler */
 function startCloud(){
-  if(!cloudOn){
-    document.getElementById('cloudWarn').textContent='';
-    return;
-  }
-  const cw=document.getElementById('cloudWarn'); if(cw)cw.textContent='';
+  if(!cloudOn)return;
   if(CURRENT.rol==='patron'){
     // patron herkesin kaydını görür
     db.ref('kayitlar').on('value',snap=>{
@@ -4239,7 +4240,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · Güner Muhasebe adı';
+const SURUM='2026-07-28 · arayüz düzeni';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
@@ -4299,8 +4300,6 @@ setInterval(surumKontrol,3600000);
 /* ---------- init ---------- */
 (async function(){
   initFirebase();
-  const cw=document.getElementById('cloudWarn');
-  if(cw&&!cloudOn)cw.textContent='Bulut bağlı değil — girişler sadece bu cihazda kalır. (Firebase config eklenmedi)';
   const sb=document.getElementById('surumBilgi'); if(sb)sb.textContent='sürüm '+SURUM;
   await loadKullanicilar();          // adlar ve PIN'ler giriş ekranından önce hazır olmalı
   NOTES=await Store.get('notes',[]);
