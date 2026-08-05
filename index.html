@@ -67,7 +67,9 @@
   }
   .marka span{
     position:relative;display:inline-block;
-    font-size:17px;font-weight:700;letter-spacing:.24em;text-indent:.24em;
+    /* letter-spacing son harften sonra da boşluk bırakır; onu negatif
+       kenar boşluğuyla kesiyoruz ki yazı gerçekten ortalansın. */
+    font-size:17px;font-weight:700;letter-spacing:.24em;margin-right:-.24em;
     text-transform:uppercase;
     color:var(--graphite);                 /* gradient desteklenmezse düz renk */
   }
@@ -4254,7 +4256,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · patron belge muaf';
+const SURUM='2026-07-28 · marka hizası';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
