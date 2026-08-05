@@ -190,8 +190,9 @@
 <body>
 
 <div class="marka"><span>Güner Muhasebe</span></div>
-<header>
-  <span id="hdrTitle">Sesli &amp; Görsel Kayıt</span>
+<!-- Giriş ekranında gizli: marka tek başına dursun -->
+<header id="ustBar" style="display:none">
+  <span id="hdrTitle"></span>
   <small id="hdrRight"></small>
 </header>
 
@@ -532,19 +533,10 @@ function belgeZorunluKategori(ad){
   return SANTIYE_KATEGORILERI.some(k=>trLower(k)===trLower(ad||''));
 }
 
+/* KDV oranı kayıt sırasında sorulmuyor: her kalemde çıkması akışı
+   yavaşlatıyordu. Varsayılan %20 ile kaydedilir; gerçek oran belge
+   okunduğunda evraktan alınır, gerekirse Muhasebe ekranından düzeltilir. */
 let PENDING_KDV=20;
-function kdvSecHTML(){
-  PENDING_KDV=20;
-  const oranlar=[20,10,1,0];
-  return '<label style="margin-top:8px">KDV oranı</label>'
-    +'<div id="kdvBtns" class="row">'
-    +oranlar.map(o=>'<button type="button" class="btn sm '+(o===20?'':'ghost')+'" data-k="'+o+'" onclick="secKdv('+o+')">%'+o+'</button>').join('')
-    +'</div>';
-}
-function secKdv(o){
-  PENDING_KDV=o;
-  document.querySelectorAll('#kdvBtns button').forEach(b=>b.className='btn sm '+(parseInt(b.dataset.k,10)===o?'':'ghost'));
-}
 
 let PENDING_DOC=null;        // {dataUrl}
 let PENDING_METHOD='nakit';
@@ -786,7 +778,7 @@ function showAiConfirm(items,rawText,fallback,elle,yontem){
   });
   resetOdeme();
   html+=(fallback==='hata'?'<div class="muted" style="margin-top:8px">(Yapay zekâya ulaşılamadı, cihaz içi çözümleme kullanıldı)</div>':'')
-    +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+odemeSecHTML()+kdvSecHTML()+'</div>'
+    +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+odemeSecHTML()+'</div>'
     +'<div class="row" style="margin-top:14px"><button class="btn sm green" onclick="confirmAi()">Onayla</button>'
     +'<button class="btn sm ghost" onclick="cancelAi()">İptal</button></div></div>';
   box.innerHTML=html;
@@ -1440,6 +1432,7 @@ async function doLogin(){
   CURRENT={rol:u.rol, ad:u.ad, mudurId:u.mudurId};
   document.getElementById('login').style.display='none';
   document.getElementById('login').classList.remove('active');
+  document.getElementById('ustBar').style.display='';   // giriş sonrası ekran adı görünür
   applyRole();
   startCloud();
   await loadSites(); loadFabrika();
@@ -1459,6 +1452,7 @@ function logout(){
   CURRENT=null;
   document.getElementById('pinInput').value='';
   document.getElementById('loginStatus').textContent='';
+  document.getElementById('ustBar').style.display='none';   // markayı yalnız bırak
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   const lg=document.getElementById('login'); lg.style.display='block';
 }
@@ -1870,7 +1864,7 @@ function showManagerConfirm(bilinen,bilinmeyen,rawText){
     +'<div style="font-weight:600;margin-bottom:8px">Gönderilecek</div>'
     +bilinen.map(i=>'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span>'+escapeHtml(i.known)+'</span><b>'+money(i.amount)+'</b></div>').join('')
     +(bilinmeyen.length?'<div class="muted" style="margin-top:8px">'+bilinmeyen.length+' kalem tanımsız, gönderilmeyecek.</div>':'')
-    +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+odemeSecHTML()+kdvSecHTML()+'</div>'
+    +'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+odemeSecHTML()+'</div>'
     +'<div class="row" style="margin-top:14px"><button class="btn sm green" onclick="confirmManager()">Onayla ve Gönder</button>'
     +'<button class="btn sm ghost" onclick="cancelManager()">İptal</button></div>'
     +'<div class="muted" style="margin-top:8px;font-size:12px">🎤 "evet" ya da "hayır" diyebilirsin.</div></div>';
@@ -4245,7 +4239,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · resmi evraklar';
+const SURUM='2026-07-28 · sade onay';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
