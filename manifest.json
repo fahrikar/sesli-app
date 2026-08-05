@@ -1,7 +1,7 @@
 {
-  "name": "Sesli & Görsel Kayıt",
-  "short_name": "Sesli Kayıt",
-  "description": "Sesli komutla gider, stok ve satış takibi",
+  "name": "Güner Muhasebe",
+  "short_name": "Güner Muhasebe",
+  "description": "Sesli komutla şantiye gideri, evrak ve muhasebe takibi",
   "lang": "tr",
   "dir": "ltr",
   "start_url": "./",
