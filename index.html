@@ -678,12 +678,11 @@ Cümle: "${cumle}"`;
 /* AI onay ekranı */
 let AI_PENDING=null;
 
-/* Konuşulan cümle onaysız kaydedilebilir mi?
+/* Konuşulan cümle onaysız kaydedilebilir mi? (Otomatik kayıt hep açıktır.)
    Kaydedilemeyecek haller onay ekranına düşer:
    - tanınmayan kalem var (yanlış klasöre atmayalım)
    - ödeme yöntemi belge gerektiriyor (dekont/çek görüntüsü/slip eklenmeli) */
 function otomatikKaydedilebilir(items,txt){
-  if(SETTINGS.otomatik===false)return false;
   if(!items.length)return false;
   if(items.some(i=>!i.known))return false;
   const y=odemeYontemiTespit(txt)||'nakit';
@@ -2126,7 +2125,7 @@ function fuzzyHas(text,key){
 
 /* ---------- ÖĞRENEN SÖZLÜK ---------- */
 let LEXICON=[];           // {kelime, kategori}
-const SES_VARSAYILAN={kayit:true,stok:true,anomali:true,ogrenme:true,otomatik:true};
+const SES_VARSAYILAN={kayit:true,stok:true,anomali:true,ogrenme:true};
 let SETTINGS=Object.assign({},SES_VARSAYILAN);
 
 function learnedMatch(text){
@@ -2975,6 +2974,19 @@ function renderBelgeBekleyen(){
     +(list.length>20?'<div class="muted" style="margin-top:8px">İlk 20 kayıt gösteriliyor.</div>':'')
     +'</div>';
 }
+/* Yedekleme kartı — hem dolu hem boş tabloda aynı görünsün diye ortak */
+function yedeklemeKarti(){
+  return '<div class="card"><div style="font-weight:500;margin-bottom:4px">Yedekleme</div>'
+    +'<div class="muted" style="margin-bottom:10px">Veriler telefonda saklanıyor. Düzenli yedek al.</div>'
+    +'<div class="row"><button class="btn sm ghost" onclick="logout()">Çıkış Yap</button>'
+    +'<button class="btn sm" onclick="backupAll()">Yedek Al</button>'
+    +'<label class="btn sm ghost" style="text-align:center">Geri Yükle'
+    +'<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)"></label></div>'
+    +'<div class="muted" style="margin-top:10px;font-size:11px;display:flex;justify-content:space-between;align-items:center">'
+      +'<span>sürüm '+SURUM+'</span>'
+      +'<span onclick="guncellemeKontrol()" style="cursor:pointer;text-decoration:underline">güncelle</span></div>'
+    +'</div>';
+}
 function renderNotes(){ renderTable(); }
 function renderTable(){
   renderHomeStats();
@@ -2987,17 +2999,9 @@ function renderTable(){
   /* Kayıt yokken de yönetim kartları görünmeli: aksi halde patron ilk
      kurulumda müdür atayamıyor, müdür şifresini değiştiremiyordu. */
   if(!rows.length){
-    box.innerHTML=renderKullanicilar()
-      +'<div class="card"><div style="font-weight:500;margin-bottom:4px">Yedekleme</div>'
-      +'<div class="muted" style="margin-bottom:10px">Veriler telefonda saklanıyor. Düzenli yedek al.</div>'
-      +'<div class="row"><button class="btn sm ghost" onclick="logout()">Çıkış Yap</button>'
-      +'<button class="btn sm" onclick="backupAll()">Yedek Al</button>'
-      +'<label class="btn sm ghost" style="text-align:center">Geri Yükle'
-      +'<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)"></label></div>'
-      +'<div class="muted" style="margin-top:10px;font-size:11px;display:flex;justify-content:space-between;align-items:center">'
-        +'<span>sürüm '+SURUM+'</span>'
-        +'<span onclick="guncellemeKontrol()" style="cursor:pointer;text-decoration:underline">güncelle</span></div></div>'
-      +'<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>';
+    box.innerHTML=yedeklemeKarti()
+      +'<div class="empty">Henüz kalem yok.<br>Ana ekranda mikrofonu basılı tutup konuş.</div>'
+      +renderKullanicilar();
     return;
   }
   // Borç/alacak gider değildir; kendi kartında toplanır, gider toplamına girmez
@@ -3036,14 +3040,7 @@ function renderTable(){
     {k:'ogrenme', ad:'Öğrenme teyidi',  aciklama:'Yeni kelime öğretince'}
   ];
   const acikSayi=sesler.filter(x=>SETTINGS[x.k]!==false).length;
-  const oto=SETTINGS.otomatik!==false;
-  html='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
-     +'<div style="flex:1"><div style="font-weight:600">Otomatik kayıt</div>'
-     +'<div class="muted" style="font-size:12px">Açıkken konuştuğunuz kalemler onay beklemeden ilgili kategoriye yazılır. '
-     +'Tanınmayan kalem varsa ya da dekont/çek/slip gerekiyorsa yine onay ekranı çıkar.</div></div>'
-     +'<button class="btn sm '+(oto?'':'ghost')+'" onclick="toggleSes(\'otomatik\')">'+(oto?'Açık':'Kapalı')+'</button>'
-     +'</div></div>'
-     +'<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+  const sesKarti='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
      +'<div style="font-weight:600">Sesli uyarılar</div>'
      +'<div class="row"><button class="btn sm ghost" onclick="tumSes(true)">Hepsi açık</button>'
      +'<button class="btn sm ghost" onclick="tumSes(false)">Hepsi kapalı</button></div></div>'
@@ -3052,21 +3049,14 @@ function renderTable(){
         +'<div style="flex:1"><div style="font-weight:500">'+x.ad+'</div><div class="muted">'+x.aciklama+'</div></div>'
         +'<button class="btn sm '+(SETTINGS[x.k]!==false?'':'ghost')+'" onclick="toggleSes(\''+x.k+'\')">'
         +(SETTINGS[x.k]!==false?'Açık':'Kapalı')+'</button></div>').join('')
-     +'</div>'
-     +'<div class="card"><div style="font-weight:500;margin-bottom:4px">Yedekleme</div>'
-     +'<div class="muted" style="margin-bottom:10px">Veriler telefonda saklanıyor. Düzenli yedek al.</div>'
-     +'<div class="row"><button class="btn sm ghost" onclick="logout()">Çıkış Yap</button>'
-     +'<button class="btn sm" onclick="backupAll()">Yedek Al</button>'
-     +'<label class="btn sm ghost" style="text-align:center">Geri Yükle'
-     +'<input type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)"></label></div>'
-     +'<div class="muted" style="margin-top:10px;font-size:11px;display:flex;justify-content:space-between;align-items:center">'
-       +'<span>sürüm '+SURUM+'</span>'
-       +'<span onclick="guncellemeKontrol()" style="cursor:pointer;text-decoration:underline">güncelle</span></div>'
-     +'</div>'
-     +renderKullanicilar()
-     +renderBelgeBekleyen()
+     +'</div>';
+  // Sıra: yedekleme ve borç/alacak en üstte, kullanıcılar en altta
+  html=yedeklemeKarti()
      +renderBorcAlacak()
-     +html;
+     +renderBelgeBekleyen()
+     +sesKarti
+     +html
+     +renderKullanicilar();
 
   // tanımsız kalemleri öğretme
   const unkRows=[];
@@ -4260,7 +4250,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · mikrofon alanı';
+const SURUM='2026-07-28 · tablo düzeni';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
