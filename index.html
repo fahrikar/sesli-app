@@ -603,11 +603,9 @@ function pickDoc(ev){
 function belgeGerekliMi(items){
   const o=ODEME_YONTEMLERI.find(x=>x.k===PENDING_METHOD);
   if(!o||!o.belge)return false;
-  if(CURRENT&&CURRENT.rol==='fabrika')return false; // fabrika müdürü (Ömer) muaf
-  const kontrolluKalem=(items||[]).some(i=>belgeZorunluKategori(i.known||i.category));
-  if(kontrolluKalem)return true;                    // kategori bazlı zorunluluk
-  if(CURRENT&&CURRENT.rol==='patron')return false;  // diğer kalemlerde patron muaf
-  return true;
+  // Patron ve fabrika müdürü (Ömer) belge şartından tamamen muaf
+  if(CURRENT&&(CURRENT.rol==='patron'||CURRENT.rol==='fabrika'))return false;
+  return true;   // müdürlerde banka/çek/kredi kartı ödemesinde belge zorunlu
 }
 async function uploadDoc(noteId){
   if(!PENDING_DOC)return null;
@@ -730,8 +728,9 @@ function otomatikOzet(not,anomali){
         +(i.kisi?' · '+escapeHtml(i.kisi):'')+(i.odemeGunu?' · vade '+fmtDate(i.odemeGunu):'')+'</div></div>'
         +'<b style="white-space:nowrap">'+money(i.amount)+'</b></div>').join('')
     +'<div class="muted" style="margin-top:8px;font-size:12px">'+escapeHtml(not.odeme)+'</div>'
-    // Kayıt anında belgeye yönlendir: fişi çekmenin en kolay olduğu an burasıdır
-    +(not.belge?'':'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">'
+    /* Kayıt anında belgeye yönlendir: fişi çekmenin en kolay olduğu an burasıdır.
+       Patron kendi kaydında belgeyle uğraşmaz; bu adım ona gösterilmez. */
+    +((not.belge||belgeIstemeyenRol())?'':'<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">'
         +'<div style="font-weight:600;margin-bottom:2px">📷 Fişi/faturayı ekleyin</div>'
         +'<div class="muted" style="font-size:12px;margin-bottom:10px">Şimdi çekmek en kolayı. Elinizde yoksa sonra ekleyebilirsiniz.</div>'
         +'<div class="row"><button class="btn sm green" onclick="belgeEkleKayda('+not.id+')">📷 Belge Ekle</button>'
@@ -742,7 +741,7 @@ function otomatikOzet(not,anomali){
   }else sayItems(not.items,[]);
   clearTimeout(otomatikOzet._t);
   // belge beklenirken ekran kendiliğinden kapanmasın
-  if(not.belge)otomatikOzet._t=setTimeout(()=>{ box.style.display='none'; box.innerHTML=''; },9000);
+  if(not.belge||belgeIstemeyenRol())otomatikOzet._t=setTimeout(()=>{ box.style.display='none'; box.innerHTML=''; },9000);
 }
 function belgeSonra(){
   const box=document.getElementById('confirmBox');
@@ -961,14 +960,20 @@ function belgeEkleKayda(noteId){
   };
   inp.click();
 }
-/* Müdürün belgesiz kayıtları — sonradan tamamlansın diye listelenir */
+/* Patron ve fabrika müdürü kendi kaydında belge sorulmaz */
+function belgeIstemeyenRol(){
+  return !!(CURRENT&&(CURRENT.rol==='patron'||CURRENT.rol==='fabrika'));
+}
+/* Belgesi eksik kayıtlar — sonradan tamamlansın diye listelenir.
+   Patron müdürlerin eksiklerini görür; kendi kayıtları listeye girmez. */
 function belgesizKayitlarim(){
   return NOTES.filter(n=>{
     if(n.belge)return false;
     if(n.satis)return false;
     if(!(n.items||[]).some(i=>i.known))return false;
     if(CURRENT&&CURRENT.rol==='mudur')return n.mudurId===CURRENT.mudurId||!n.mudurId;
-    return true;
+    if(CURRENT&&CURRENT.rol==='patron')return n.mudurId&&n.mudurId!=='patron';
+    return false;                       // fabrika rolünde takip listesi yok
   });
 }
 
@@ -4249,7 +4254,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · güvenli alan';
+const SURUM='2026-07-28 · patron belge muaf';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
