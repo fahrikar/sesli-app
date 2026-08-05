@@ -60,7 +60,10 @@
     position:sticky;top:0;z-index:6;
     background:linear-gradient(180deg,#fffdf8 0%, var(--bg2) 100%);
     border-bottom:1px solid var(--line);
-    padding:15px 20px 14px;text-align:center;overflow:hidden;
+    /* viewport-fit=cover ile içerik durum çubuğunun/çentiğin altına
+       giriyordu; güvenli alan kadar aşağı itiyoruz. */
+    padding:calc(15px + env(safe-area-inset-top,0px)) 20px 14px;
+    text-align:center;overflow:hidden;
   }
   .marka span{
     position:relative;display:inline-block;
@@ -90,7 +93,7 @@
     background:linear-gradient(90deg,transparent,var(--gold2),transparent);
     box-shadow:0 0 10px 1px rgba(201,167,101,.5);
   }
-  main{flex:1;overflow-y:auto;padding-bottom:84px}
+  main{flex:1;overflow-y:auto;padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
   .screen{display:none;padding:18px}
   .screen.active{display:block}
   .btn{border:0;border-radius:980px;padding:13px 20px;font-size:15px;font-weight:500;letter-spacing:-.01em;
@@ -114,7 +117,8 @@
   /* Sabit yükseklik yerine esnek: marka çubuğu, üstteki kart ve alt menü
      eklenince içerik alt menünün altına taşıyordu. */
   .split{display:flex;flex-direction:column;gap:14px;margin-top:4px;
-    min-height:calc(100vh - 360px);min-height:calc(100dvh - 360px)}
+    min-height:calc(100vh - 360px);
+    min-height:calc(100dvh - 360px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
   .hero{--disc:clamp(68px,min(25vw,13vh),116px);
     flex:1;min-height:140px;position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:clamp(8px,1.6vh,14px);border-radius:28px;overflow:hidden;cursor:pointer;border:1px solid var(--line);
@@ -162,7 +166,8 @@
 
   nav{position:fixed;bottom:0;left:0;right:0;display:flex;
     background:rgba(250,246,238,.82);backdrop-filter:saturate(180%) blur(14px);
-    border-top:1px solid var(--line);padding:8px 4px 12px}
+    /* iPhone'da alttaki gesture çubuğunun altında kalmasın */
+    border-top:1px solid var(--line);padding:8px 4px calc(12px + env(safe-area-inset-bottom,0px))}
   nav button{flex:1;background:none;border:0;color:var(--sub);font-size:11px;letter-spacing:-.01em;
     display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0;cursor:pointer}
   nav svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
@@ -4244,7 +4249,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · ölçekli mikrofon';
+const SURUM='2026-07-28 · güvenli alan';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
