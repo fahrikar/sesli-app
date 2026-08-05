@@ -33,7 +33,7 @@
     --sh-sm:0 1px 3px rgba(60,50,30,.06);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  body,.hero,.disc,.discwrap,.waves,nav,header,.tab,.btn{
+  body,.hero,.disc,.discwrap,nav,header,.tab,.btn{
     -webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;
     -webkit-touch-callout:none;touch-action:manipulation}
   input,textarea,.note-txt,table{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
@@ -136,7 +136,8 @@
      telefonlarda taşıyor, büyük ekranlarda kaybolmuş duruyordu.
      Hem genişliğe hem yüksekliğe bakılır (min ile). */
   .discwrap{position:relative;display:grid;place-items:center;
-    width:var(--disc);height:var(--disc)}
+    width:var(--disc);height:var(--disc);
+    margin-top:clamp(8px,2.2vh,18px)}   /* mikrofon biraz aşağıda dursun */
   .disc{width:var(--disc);height:var(--disc);border-radius:50%;display:grid;place-items:center;position:relative;z-index:2;
     transition:transform .12s ease}
   .discwrap.rec .disc{transform:scale(.94)}
@@ -146,16 +147,7 @@
   .hero p{margin:0;color:var(--sub);font-size:clamp(11.5px,3.4vw,14px);text-align:center;
     padding:0 18px;letter-spacing:-.01em}
 
-  /* ses dalgası halkaları */
-  .waves{position:absolute;top:0;left:0;width:var(--disc);height:var(--disc);
-    display:grid;place-items:center;z-index:1;pointer-events:none}
-  .waves span{position:absolute;top:0;left:0;width:var(--disc);height:var(--disc);border-radius:50%;
-    border:1.5px solid #cabfa6;opacity:0;animation:ring 3s linear infinite}
-  .waves span:nth-child(1){animation-delay:0s}
-  .waves span:nth-child(2){animation-delay:1s}
-  .waves span:nth-child(3){animation-delay:2s}
-  .discwrap.rec .waves span{animation-duration:1.5s;border-color:#a99c80}
-  @keyframes ring{0%{transform:scale(1);opacity:.45}100%{transform:scale(2.1);opacity:0}}
+
 
   /* dinlerken ekolayzer */
   .eq{display:flex;gap:5px;align-items:center;justify-content:center;height:46px;margin:2px 0}
@@ -184,8 +176,14 @@
   #micHero{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 
   /* onay katmanı: kartlar ortalanır, uzun içerik kaydırılır */
-  #confirmBox>.card{max-width:520px;margin:0 auto 12px}
-  #confirmBox{text-align:left}
+  /* Onay katmanı: kart ekranda dikey ortalanır, uzunsa kaydırılır.
+     Eskiden en üste yapışıyordu ve marka çubuğunun altına giriyordu. */
+  #confirmBox{display:none;position:fixed;inset:0;z-index:60;text-align:left;
+    background:rgba(30,25,15,.45);overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:calc(14px + env(safe-area-inset-top,0px)) 14px calc(90px + env(safe-area-inset-bottom,0px));
+    align-items:center;justify-content:center}
+  /* flex + margin:auto = hem ortalar hem uzun içerikte tepesi kırpılmaz */
+  #confirmBox>.card{max-width:480px;width:100%;margin:auto;max-height:none}
 
   video,canvas{width:100%;border-radius:16px;background:#0c0c0e}
   .rec-dot{width:9px;height:9px;border-radius:50%;background:var(--danger);display:inline-block;animation:pulse 1s infinite}
@@ -272,7 +270,6 @@
     <div class="split">
       <div class="hero mic" id="micHero">
         <div class="discwrap" id="discWrap">
-        <div class="waves"><span></span><span></span><span></span></div>
         <div class="disc mic">
           <svg viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="3" width="6" height="10" rx="3" fill="#1d1d1f" stroke="none"></rect>
@@ -473,7 +470,7 @@
   <!-- ONAY / SONUÇ KATMANI — kart içinde değil, tam ekran ve kaydırılabilir.
        (Mikrofon kartı overflow:hidden olduğu için içindeyken "Onayla" butonu
        ekran dışında kalıyor ve tıklanamıyordu.) -->
-  <div id="confirmBox" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:60;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 16px 96px"></div>
+  <div id="confirmBox"></div>
 
   <div id="manualModal" style="display:none;position:fixed;inset:0;background:rgba(30,25,15,.45);z-index:50;padding:18px;align-items:center;justify-content:center;overflow-y:auto">
     <div class="card" style="max-width:440px;margin:auto;width:100%">
@@ -560,11 +557,11 @@ let PENDING_KDV=20;
 let PENDING_DOC=null;        // {dataUrl}
 let PENDING_METHOD='nakit';
 
+/* Onay ekranında ödeme yöntemi butonları yok: yöntem cümleden anlaşılıyor
+   ("havale ile ödedim", "çekle verdim"), söylenmezse nakit sayılıyor.
+   Yalnızca belge gerekiyorsa yükleme alanı açılıyor. */
 function odemeSecHTML(){
-  return '<label>Ödeme yöntemi</label>'
-    +'<div id="odemeBtns" class="row" style="margin-bottom:4px">'
-    +ODEME_YONTEMLERI.map(o=>'<button type="button" class="btn sm '+(o.k==='nakit'?'':'ghost')+'" data-m="'+o.k+'" onclick="secOdeme(\''+o.k+'\')">'+o.ad+'</button>').join('')
-    +'</div>'
+  return '<div id="odemeBilgi" class="muted" style="font-size:12px"></div>'
     +'<div id="docArea" style="display:none;margin-top:8px">'
     +'<label id="docLabel">Belge</label>'
     +'<div class="row"><label class="btn sm ghost" style="text-align:center">📷 Belge Ekle'
@@ -575,13 +572,15 @@ function odemeSecHTML(){
 }
 function secOdeme(k){
   PENDING_METHOD=k;
-  document.querySelectorAll('#odemeBtns button').forEach(b=>{
-    b.className='btn sm '+(b.dataset.m===k?'':'ghost');
-  });
-  const o=ODEME_YONTEMLERI.find(x=>x.k===k);
+  const o=ODEME_YONTEMLERI.find(x=>x.k===k)||ODEME_YONTEMLERI[0];
+  const bilgi=document.getElementById('odemeBilgi');
+  if(bilgi)bilgi.textContent='Ödeme: '+o.ad;
   const area=document.getElementById('docArea');
-  if(o.belge){ area.style.display='block'; document.getElementById('docLabel').textContent=o.belgeAd+' (zorunlu)'; }
-  else{ area.style.display='none'; PENDING_DOC=null; }
+  if(!area)return;
+  if(o.belge&&belgeGerekliMi(AI_PENDING?AI_PENDING.items:(PENDING?PENDING.bilinen:[]))){
+    area.style.display='block';
+    document.getElementById('docLabel').textContent=o.belgeAd+' (zorunlu)';
+  }else{ area.style.display='none'; PENDING_DOC=null; }
 }
 function pickDoc(ev){
   const f=ev.target.files&&ev.target.files[0]; if(!f)return;
@@ -724,7 +723,7 @@ async function processWithAI(txt){
 function otomatikOzet(not,anomali){
   const box=document.getElementById('confirmBox');
   if(!box)return;
-  box.style.display='block';
+  box.style.display='flex';
   box.innerHTML='<div class="card" style="text-align:left">'
     +'<div style="font-weight:600;color:var(--ok);margin-bottom:8px">✓ Kaydedildi</div>'
     +not.items.map(i=>'<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line)">'
@@ -774,14 +773,14 @@ function showAiConfirm(items,rawText,fallback,elle,yontem){
   if(!box)return;
   AI_PENDING={items,rawText,elle:!!elle};
   if(!items.length){
-    box.style.display='block';
+    box.style.display='flex';
     box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">Anlaşılamadı</div>'
       +'<div class="muted" style="margin-bottom:12px">"'+escapeHtml(rawText)+'"<br>Kalem çıkarılamadı, tekrar dener misin?</div>'
       +'<button class="btn sm ghost" onclick="cancelAi()">Kapat</button></div>';
     speak('Anlayamadım, tekrar dener misin?','kayit');
     return;
   }
-  box.style.display='block';
+  box.style.display='flex';
   let html='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:4px">Onayına sunulan</div>'
     +'<div class="muted" style="margin-bottom:10px">"'+escapeHtml(rawText)+'"</div>';
   items.forEach((it,i)=>{
@@ -800,7 +799,8 @@ function showAiConfirm(items,rawText,fallback,elle,yontem){
     +'<button class="btn sm ghost" onclick="cancelAi()">İptal</button></div></div>';
   box.innerHTML=html;
   // cümlede ödeme yöntemi geçtiyse seçili gelsin (belge alanı da açılsın)
-  if(yontem&&ODEME_YONTEMLERI.some(x=>x.k===yontem))secOdeme(yontem);
+  // yöntem cümleden geldiyse onu, gelmediyse nakdi uygula (belge alanını da ayarlar)
+  secOdeme((yontem&&ODEME_YONTEMLERI.some(x=>x.k===yontem))?yontem:'nakit');
   // cümleyi ve algılananları sesli tekrar et
   const ozet=items.map(it=>it.category+' '+Math.round(it.amount).toLocaleString('tr-TR')
       +(it.kisi?' '+it.kisi:'')+(it.odemeGunu?' ödeme günü '+it.odemeGunu:'')).join(', ');
@@ -878,7 +878,7 @@ let SATIS_PENDING=null;
 function showSatisConfirm(sat,rawText){
   const box=document.getElementById('confirmBox'); if(!box)return;
   SATIS_PENDING={sat,rawText};
-  box.style.display='block';
+  box.style.display='flex';
   const miktarStr=(sat.miktar!=null)?sat.miktar.toLocaleString('tr-TR')+' '+(sat.birim||''):null;
   box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">'+escapeHtml(sat.urun||'Satış')+' Satışı</div>'
     +(miktarStr?'<div style="display:flex;justify-content:space-between;padding:5px 0"><span>Miktar</span><b>'+escapeHtml(miktarStr)+'</b></div>':'')
@@ -1871,14 +1871,14 @@ function showManagerConfirm(bilinen,bilinmeyen,rawText){
   if(!box)return;
   PENDING={bilinen,rawText};
   if(!bilinen.length){
-    box.style.display='block';
+    box.style.display='flex';
     box.innerHTML='<div class="card" style="text-align:left"><div style="font-weight:600;margin-bottom:6px">Tanımlı kalem bulunamadı</div>'
       +'<div class="muted" style="margin-bottom:12px">"'+escapeHtml(rawText)+'" içinde gönderilecek tanımlı bir gider yok. Tekrar dene.</div>'
       +'<button class="btn sm ghost" onclick="cancelManager()">Kapat</button></div>';
     speak('Tanımlı kalem bulunamadı. Tekrar dene.','kayit');
     return;
   }
-  box.style.display='block';
+  box.style.display='flex';
   resetOdeme();
   box.innerHTML='<div class="card" style="text-align:left">'
     +'<div style="font-weight:600;margin-bottom:8px">Gönderilecek</div>'
@@ -1888,6 +1888,7 @@ function showManagerConfirm(bilinen,bilinmeyen,rawText){
     +'<div class="row" style="margin-top:14px"><button class="btn sm green" onclick="confirmManager()">Onayla ve Gönder</button>'
     +'<button class="btn sm ghost" onclick="cancelManager()">İptal</button></div>'
     +'<div class="muted" style="margin-top:8px;font-size:12px">🎤 "evet" ya da "hayır" diyebilirsin.</div></div>';
+  secOdeme(PENDING_METHOD||'nakit');
   const ozet2=bilinen.map(i=>i.known+' '+Math.round(i.amount).toLocaleString('tr-TR')).join(', ');
   speak('Şunu anladım: '+ozet2+'. Onaylıyor musun?','kayit');
   sesleOnayDinle(()=>confirmManager(), ()=>cancelManager());
@@ -2808,7 +2809,7 @@ async function mikrofonTesti(){
   const ua=navigator.userAgent;
   const tarayici=/SamsungBrowser/.test(ua)?'Samsung Internet':/Chrome/.test(ua)?'Chrome':/Safari/.test(ua)?'Safari':'diğer';
   const kurulu=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-  box.style.display='block';
+  box.style.display='flex';
   box.innerHTML='<div class="card" style="text-align:left">'
     +'<div style="font-weight:600;margin-bottom:6px">Mikrofon Testi</div>'
     +sat('Sürüm',SURUM,true)
@@ -3681,7 +3682,7 @@ function belgeAc(id){
       +'style="cursor:pointer;font-weight:500;text-align:right">'
       +(deger!=null&&deger!==''?escapeHtml(String(deger)):'<span class="muted">— ekle —</span>')+' ✎</span></div>';
   const box=document.getElementById('confirmBox');
-  box.style.display='block';
+  box.style.display='flex';
   box.innerHTML='<div class="card" style="text-align:left">'
     +'<div style="font-weight:600">'+escapeHtml(kalem)+'</div>'
     +'<div class="muted" style="font-size:12px;margin-bottom:10px">'+fmt(n.createdAt)+' · '+money(tutar)
@@ -4250,7 +4251,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · tablo düzeni';
+const SURUM='2026-07-28 · sade onay ekranı';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
