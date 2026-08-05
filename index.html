@@ -538,7 +538,9 @@ const ODEME_YONTEMLERI=[
 function odemeYontemiTespit(text){
   const t=trLower(text||'');
   if(/(havale|eft|banka|hesaba|ibana|yatırdım|yatirdim)/.test(t))return 'havale';
-  if(/(çek(le|i|ini)?\b|cek(le|i)?\b)/.test(t))return 'cek';
+  /* "çek" kelimenin BAŞINDA olmalı: "ödenecek", "verecek", "gelecek"
+     hepsi "cek" ile bittiği için çek ödemesi sanılıyordu. */
+  if(new RegExp('(?:^|[^'+TRW+'])(çek|cek)(le|i|ini|ler|leri)?(?!['+TRW+'])').test(t))return 'cek';
   if(/(kredi kart|kartla|karttan|kart ile|pos)/.test(t))return 'kredi';
   if(/(nakit|elden|peşin|pesin)/.test(t))return 'nakit';
   return null;
@@ -2058,6 +2060,27 @@ function tarihAyikla(text){
     if(d<base)d=new Date(base.getFullYear()+1,a,g);   // geçmişse gelecek yıl
     return d;
   });
+  /* "ayın 15'inde", "15inde", "15'ine", "ayın 15'i" -> ayın o günü.
+     Bu kalıp olmadan "15" tutar sanılıyordu. Gün geçmişse gelecek aya
+     atılır. "gelecek/önümüzdeki ayın 15'i" de desteklenir. */
+  yakala(/(gelecek|önümüzdeki|onumuzdeki)?\s*(?:ayın|ayin)?\s*(\d{1,2})\s*['’`]?\s*(?:sinde|sında|sinda|sunda|sünde|sunde|sine|sına|sina|sune|süne|inde|ında|inda|unda|ünde|unde|ine|ına|ina|une|üne|isi|ısı|si|sı)\b/,m=>{
+    const g=parseInt(m[2],10);
+    if(!(g>=1&&g<=31))return null;
+    let d=new Date(base.getFullYear(),base.getMonth(),g);
+    if(m[1]||d<base)d=ayEkle(new Date(base.getFullYear(),base.getMonth(),g),1);
+    // ayEkle gün taşmasını düzeltir (31 Şubat gibi)
+    if(d.getDate()!==g)d=new Date(d.getFullYear(),d.getMonth()+1,0);
+    return d;
+  });
+  // "ayın 15", "ayın 15'i" — ek olmadan da yakalansın
+  yakala(/(gelecek|önümüzdeki|onumuzdeki)?\s*(?:ayın|ayin)\s+(\d{1,2})(?:\s*['’`]?\s*(?:i|ı))?\b/,m=>{
+    const g=parseInt(m[2],10);
+    if(!(g>=1&&g<=31))return null;
+    let d=new Date(base.getFullYear(),base.getMonth(),g);
+    if(m[1]||d<base)d=ayEkle(new Date(base.getFullYear(),base.getMonth(),g),1);
+    if(d.getDate()!==g)d=new Date(d.getFullYear(),d.getMonth()+1,0);
+    return d;
+  });
   // "3 ay sonra", "2 hafta sonra", "10 gün sonra", "1 yıl sonra"
   yakala(/(\d+)\s*(gün|gun|hafta|ay|yıl|yil|sene)\s*sonra/,m=>{
     const n=parseInt(m[1],10); if(!n)return null;
@@ -2109,8 +2132,16 @@ function lev(a,b){
 }
 function fuzzyHas(text,key){
   const t=trLower(text), k=trLower(key);
+  /* Kısa anahtarlar kelimenin İÇİNDE geçince yanlış eşleşiyordu:
+     "ödenecek", "verecek", "gelecek" hepsi "cek" içerdiği için Çek
+     kategorisine düşüyordu. Türkçede ekler sona geldiği için kısa
+     anahtarın kelimenin BAŞINDA olması aranır: "işçilere" → işçi ✓,
+     "kuma" → kum ✓, ama "ödenecek" → cek ✗. */
+  if(k.length<=4){
+    const kacis=k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return new RegExp('(?:^|[^'+TRW+'])'+kacis,'i').test(t)?k.length:0;
+  }
   if(t.includes(k))return k.length;
-  if(k.length<4)return 0;
   const words=t.split(/\s+/);
   const kw=k.split(/\s+/);
   if(kw.length===1){
@@ -2222,7 +2253,7 @@ const CATEGORY_MAP=[
   {ad:'İşçi Ödemeleri',    grup:'Şantiye Giderleri',          kelimeler:['işçi','isci','personel','yevmiye','maaş','maas','işçi ödeme']},
   {ad:'Demir',             grup:'Şantiye Giderleri',          kelimeler:['demir','nervür','nervur','hasır çelik','hasir celik','filiz','çelik','celik']},
   {ad:'Beton',             grup:'Şantiye Giderleri',          kelimeler:['beton','hazır beton','hazir beton','mikser','şap','sap','pompa']},
-  {ad:'Hırdavat',          grup:'Şantiye Giderleri',          kelimeler:['hırdavat','hirdavat','çivi','civi','vida','civata','tel']},
+  {ad:'Hırdavat',          grup:'Şantiye Giderleri',          kelimeler:['hırdavat','hirdavat','çivi','civi','vida','civata','somun','cıvata']},
   {ad:'Harfiyat',          grup:'Şantiye Giderleri',          kelimeler:['harfiyat','hafriyat','kazı','kazi','kepçe','kepce','ekskavatör','ekskavator','dozer']},
   {ad:'Vinç Ödemeleri',    grup:'Şantiye Giderleri',          kelimeler:['vinç','vinc','kule vinç','kule vinc','forklift','manlift']},
   {ad:'Diğer Gider',       grup:'Fabrika Giderleri',          kelimeler:['diğer gider','diger gider','genel gider']},
@@ -2274,7 +2305,7 @@ function stripFiller(s){ let p=null,c=s||''; while(p!==c){p=c;c=c.replace(LABEL_
    "Mehmet'e 5 milyon verdim 3 ay sonra salı günü verecek"  -> Alacak
    "Ahmetten 20 bin borç aldım"                              -> Borç          */
 const BORC_KEL=/(borç|borc|ödünç|odunc|alacak|emanet)/i;
-const GERI_VERECEK=/(verecek|ödeyecek|odeyecek|getirecek|geri verecek|geri ödeyecek)/i;
+const GERI_VERECEK=/(verecek|verilecek|ödeyecek|odeyecek|ödenecek|odenecek|getirecek|geri verecek|geri ödeyecek)/i;
 const ALDIM_KEL=/(ald[ıi]m|ald[ıi]k|çektim|cektim)/i;
 /* Cümle bir borç/alacak kaydı mı? Yönünü de döndürür. */
 function borcTespit(text){
@@ -4346,7 +4377,7 @@ function checkReminders(){
 }
 
 /* Sürüm — telefondaki kopyanın güncel olup olmadığını anlamak için */
-const SURUM='2026-07-28 · vade ekleme';
+const SURUM='2026-07-28 · ayın günü';
 
 /* Sunucudaki sürümü doğrudan sor — service worker takılsa bile güncelleme insin.
    surum.json önbelleğe hiç girmez; farklıysa önbellek temizlenip sayfa yenilenir. */
